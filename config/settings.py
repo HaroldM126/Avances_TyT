@@ -23,9 +23,7 @@ DATABASES = {
         'PORT': '3306',
     }
 }
-LANGUAGE_CODE = 'es'
-TIME_ZONE = 'America/Bogota'
-USE_TZ = True
+
 
 from pathlib import Path
 
@@ -58,6 +56,12 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'core',
 ]
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ),
+}
 
 #AUTH_USER_MODEL = 'core.Usuario' 
 
@@ -147,3 +151,4 @@ MAILERS = {
         'BACKEND': 'django.core.mail.backends.console.EmailBackend',
     },
 }
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
