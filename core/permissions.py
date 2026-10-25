@@ -23,3 +23,17 @@ def has_active_permission(user, codename):
         permissions__content_type__app_label='core',
         permissions__codename=codename,
     ).exists()
+
+
+class PuedeGestionarPreguntas(BasePermission):
+    message = 'No tiene permiso para gestionar el banco de preguntas.'
+
+    def has_permission(self, request, view):
+        return has_active_permission(request.user, 'manage_question_bank')
+
+
+class PuedeConfigurarCuestionarios(BasePermission):
+    message = 'No tiene permiso para configurar cuestionarios.'
+
+    def has_permission(self, request, view):
+        return has_active_permission(request.user, 'configure_quizzes')
