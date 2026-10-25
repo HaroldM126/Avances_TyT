@@ -1,5 +1,6 @@
 from django.db import models
 from django.contrib.auth.models import User
+from django.contrib.auth.models import Group
 
 
 class Categoria(models.Model):
@@ -7,6 +8,21 @@ class Categoria(models.Model):
 
     def __str__(self):
         return self.nombre
+
+
+class Rol(models.Model):
+    grupo = models.OneToOneField(
+        Group,
+        on_delete=models.CASCADE,
+        related_name='rol',
+    )
+    activo = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ('grupo__name',)
+
+    def __str__(self):
+        return self.grupo.name
 
 
 class Pregunta(models.Model):
@@ -38,6 +54,15 @@ class OpcionRespuesta(models.Model):
 class Cuestionario(models.Model):
     nombre = models.CharField(max_length=100)
     fecha_creacion = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        permissions = [
+            ('manage_users', 'Puede administrar usuarios'),
+            ('manage_roles', 'Puede administrar roles y permisos'),
+            ('manage_question_bank', 'Puede administrar el banco de preguntas'),
+            ('configure_quizzes', 'Puede configurar cuestionarios'),
+            ('view_results', 'Puede consultar resultados'),
+        ]
 
     def __str__(self):
         return self.nombre
