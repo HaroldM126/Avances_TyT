@@ -1,8 +1,7 @@
 from django.contrib import admin
 from django.urls import include, path
 from core.views import inicio
-from core.auth_views import AuthTokenView
-from rest_framework_simplejwt.views import TokenRefreshView
+from core.auth_views import AuthTokenView, SessionTokenRefreshView
 
 urlpatterns = [
     path('', inicio),
@@ -17,7 +16,7 @@ urlpatterns = [
 
     path(
         'api/token/refresh/',
-        TokenRefreshView.as_view(),
+        SessionTokenRefreshView.as_view(),
         name='token_refresh'
     ),
     path('api/', include('core.urls')),

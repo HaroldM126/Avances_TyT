@@ -1,5 +1,6 @@
 import io
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from typing import Optional
 
 from openpyxl import Workbook, load_workbook
@@ -11,7 +12,9 @@ COLUMNAS_ESPERADAS = [
     'categoria',
     'competencia',
     'tipo',
+    'texto_base',
     'enunciado',
+    'retroalimentacion',
     'explicacion',
     'puntaje',
     'opcion_a',
@@ -46,7 +49,9 @@ def construir_plantilla():
         'Matematicas',
         'Razonamiento cuantitativo',
         'UNICA',
+        'Contexto de la pregunta',
         'Cuanto es 2 + 2?',
+        'La suma de dos y dos es cuatro.',
         'Suma basica de enteros',
         1.0,
         '3',
@@ -131,7 +136,9 @@ def validar_excel(file_obj):
         categoria_nombre = val('categoria')
         competencia_nombre = val('competencia')
         tipo = val('tipo')
+        texto_base = val('texto_base') or ''
         enunciado = val('enunciado')
+        retroalimentacion = val('retroalimentacion') or ''
         explicacion = val('explicacion') or ''
         puntaje_raw = fila[indice['puntaje']] if indice['puntaje'] < len(fila) else None
         correctas_raw = fila[indice['correctas']] if indice['correctas'] < len(fila) else None
@@ -163,11 +170,15 @@ def validar_excel(file_obj):
             errores.append(f'tipo invalido: debe ser {", ".join(sorted(TIPOS_VALIDOS))}')
 
         try:
-            puntaje = float(puntaje_raw) if puntaje_raw not in (None, '') else 1.0
+            puntaje = (
+                Decimal(str(puntaje_raw))
+                if puntaje_raw not in (None, '')
+                else Decimal('1')
+            )
             if puntaje <= 0:
                 errores.append('puntaje debe ser mayor que cero')
-        except (TypeError, ValueError):
-            puntaje = 1.0
+        except (TypeError, ValueError, InvalidOperation):
+            puntaje = Decimal('1')
             errores.append('puntaje debe ser numerico')
 
         correctas = _parsear_correctas(correctas_raw, tipo) if tipo else []
@@ -182,7 +193,7 @@ def validar_excel(file_obj):
             elif letra not in opciones_validas:
                 errores.append(f'la opcion {letra} esta marcada como correcta pero no tiene texto')
 
-        if tipo == Pregunta.TIPO_UNICA and len(correctas) != 1:
+        if tipo in (Pregunta.TIPO_UNICA, Pregunta.TIPO_MULTIPLE) and len(correctas) != 1:
             errores.append('para UNICA debe haber exactamente 1 correcta')
         if tipo == Pregunta.TIPO_VF:
             if len(opciones_validas) != 2:
@@ -194,7 +205,9 @@ def validar_excel(file_obj):
             'categoria': categoria_nombre,
             'competencia': competencia_nombre,
             'tipo': tipo,
+            'texto_base': texto_base,
             'enunciado': enunciado,
+            'retroalimentacion': retroalimentacion,
             'explicacion': explicacion,
             'puntaje': puntaje,
             'opciones': [
@@ -219,10 +232,12 @@ def guardar_filas(filas_validadas):
         pregunta = Pregunta(
             categoria=categoria,
             competencia=competencia,
+            texto_base=datos['texto_base'],
             enunciado=datos['enunciado'],
+            retroalimentacion=datos['retroalimentacion'],
             explicacion=datos['explicacion'],
             tipo=datos['tipo'],
-            puntaje=datos['puntaje'],
+            puntaje=Decimal(str(datos['puntaje'])),
             activa=True,
         )
         pregunta.full_clean(exclude=['opciones'])

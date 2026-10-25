@@ -1,14 +1,20 @@
 from django.contrib.auth.models import Group, Permission, User
+from datetime import datetime, timezone as datetime_timezone
+
+from django.utils import timezone
+from rest_framework_simplejwt.tokens import UntypedToken
+from uuid import uuid4
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
-from .models import Rol
+from .models import Rol, SesionJWT
 
 
 class AuthTokenSerializer(TokenObtainPairSerializer):
     @classmethod
     def get_token(cls, user):
         token = super().get_token(user)
+        token['session_id'] = str(uuid4())
         token['roles'] = list(
             user.groups.filter(rol__activo=True).values_list('name', flat=True)
         )
@@ -17,6 +23,19 @@ class AuthTokenSerializer(TokenObtainPairSerializer):
 
     def validate(self, attrs):
         data = super().validate(attrs)
+        refresh_claims = UntypedToken(data['refresh'])
+        session_id = refresh_claims['session_id']
+        for token_key in ('access', 'refresh'):
+            token = UntypedToken(data[token_key])
+            SesionJWT.objects.create(
+                sesion_id=session_id,
+                jti=token['jti'],
+                usuario=self.user,
+                expira_en=datetime.fromtimestamp(
+                    token['exp'],
+                    tz=datetime_timezone.utc,
+                ),
+            )
         data['user'] = UserSerializer(self.user).data
         return data
 
