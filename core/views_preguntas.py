@@ -1,9 +1,13 @@
-from django.shortcuts import get_object_or_404
+from django.db import transaction
+from django.http import HttpResponse
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
+from .excel_utils import construir_plantilla, guardar_filas, validar_excel
 from .models import Categoria, Competencia, Pregunta
 from .permissions import PuedeGestionarPreguntas
 from .serializers_preguntas import (
@@ -82,4 +86,98 @@ class PreguntaViewSet(viewsets.ModelViewSet):
         return Response(
             PreguntaSerializer(pregunta).data,
             status=status.HTTP_200_OK,
+        )
+
+
+class PlantillaExcelView(APIView):
+    permission_classes = [IsAuthenticated, PuedeGestionarPreguntas]
+
+    def get(self, request):
+        buffer = construir_plantilla()
+        response = HttpResponse(
+            buffer.getvalue(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        response['Content-Disposition'] = 'attachment; filename="plantilla_preguntas.xlsx"'
+        return response
+
+
+class ImportarPreviewView(APIView):
+    permission_classes = [IsAuthenticated, PuedeGestionarPreguntas]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        archivo = request.FILES.get('archivo')
+        if not archivo:
+            return Response(
+                {'detail': 'Debes adjuntar un archivo en el campo "archivo".'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        resultado = validar_excel(archivo)
+        if resultado['error_global']:
+            return Response(
+                {'detail': resultado['error_global']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        filas = resultado['filas']
+        validas = sum(1 for f in filas if f.valida)
+        invalidas = len(filas) - validas
+        payload = {
+            'total': len(filas),
+            'validas': validas,
+            'invalidas': invalidas,
+            'filas': [
+                {
+                    'numero': f.numero,
+                    'valida': f.valida,
+                    'errores': f.errores,
+                    'datos': f.datos,
+                }
+                for f in filas
+            ],
+        }
+        return Response(payload, status=status.HTTP_200_OK)
+
+
+class ImportarConfirmarView(APIView):
+    permission_classes = [IsAuthenticated, PuedeGestionarPreguntas]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        archivo = request.FILES.get('archivo')
+        if not archivo:
+            return Response(
+                {'detail': 'Debes adjuntar un archivo en el campo "archivo".'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        resultado = validar_excel(archivo)
+        if resultado['error_global']:
+            return Response(
+                {'detail': resultado['error_global']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        filas = resultado['filas']
+        invalidas = [f for f in filas if not f.valida]
+        if invalidas:
+            return Response(
+                {
+                    'detail': 'Hay filas invalidas: corrige el archivo antes de confirmar.',
+                    'filas_invalidas': [
+                        {'numero': f.numero, 'errores': f.errores}
+                        for f in invalidas
+                    ],
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            with transaction.atomic():
+                creadas = guardar_filas(filas)
+        except ValueError as e:
+            return Response(
+                {'detail': str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(
+            {'detail': f'{creadas} preguntas importadas correctamente.'},
+            status=status.HTTP_201_CREATED,
         )

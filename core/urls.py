@@ -15,6 +15,9 @@ from .auth_views import (
 from .views_preguntas import (
     CategoriaViewSet,
     CompetenciaViewSet,
+    ImportarConfirmarView,
+    ImportarPreviewView,
+    PlantillaExcelView,
     PreguntaViewSet,
 )
 
@@ -32,6 +35,22 @@ urlpatterns = [
     path('roles/', RoleListCreateView.as_view(), name='role_list_create'),
     path('roles/<int:pk>/', RoleDetailView.as_view(), name='role_detail'),
     path('permissions/', PermissionListView.as_view(), name='permission_list'),
+
+    path(
+        'preguntas/importar/plantilla/',
+        PlantillaExcelView.as_view(),
+        name='preguntas_importar_plantilla',
+    ),
+    path(
+        'preguntas/importar/preview/',
+        ImportarPreviewView.as_view(),
+        name='preguntas_importar_preview',
+    ),
+    path(
+        'preguntas/importar/confirmar/',
+        ImportarConfirmarView.as_view(),
+        name='preguntas_importar_confirmar',
+    ),
 ]
 
 router = DefaultRouter()
