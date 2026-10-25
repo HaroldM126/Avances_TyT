@@ -65,7 +65,9 @@ class PreguntaSerializer(serializers.ModelSerializer):
             'categoria_nombre',
             'competencia',
             'competencia_nombre',
+            'texto_base',
             'enunciado',
+            'retroalimentacion',
             'explicacion',
             'tipo',
             'puntaje',
@@ -78,33 +80,23 @@ class PreguntaSerializer(serializers.ModelSerializer):
         opciones = data.get('opciones', None)
 
         if opciones is not None:
-            if len(opciones) < 2:
-                raise serializers.ValidationError(
-                    {'opciones': 'Debes registrar al menos 2 opciones.'}
-                )
-            correctas = [o for o in opciones if o.get('es_correcta')]
-            if tipo == Pregunta.TIPO_UNICA and len(correctas) != 1:
-                raise serializers.ValidationError(
-                    {'opciones': 'Para opción única debe haber exactamente una opción correcta.'}
-                )
-            if tipo == Pregunta.TIPO_MULTIPLE and len(correctas) < 1:
-                raise serializers.ValidationError(
-                    {'opciones': 'Para opción múltiple debe haber al menos una opción correcta.'}
-                )
-            if tipo == Pregunta.TIPO_VF:
-                if len(opciones) != 2:
-                    raise serializers.ValidationError(
-                        {'opciones': 'Para verdadero/falso debe haber exactamente 2 opciones.'}
-                    )
-                if len(correctas) != 1:
-                    raise serializers.ValidationError(
-                        {'opciones': 'Para verdadero/falso debe haber exactamente una opción correcta.'}
-                    )
+            pregunta = Pregunta(tipo=tipo)
+            try:
+                pregunta.validar_opciones(opciones)
+            except DjangoValidationError as error:
+                raise serializers.ValidationError(error.message_dict)
 
+        puntaje = data.get('puntaje', getattr(self.instance, 'puntaje', None))
+        if puntaje is not None and puntaje <= 0:
+            raise serializers.ValidationError(
+                {'puntaje': 'El puntaje debe ser mayor que cero.'}
+            )
         return data
 
     def create(self, validated_data):
         opciones_data = validated_data.pop('opciones', [])
+        if validated_data.get('retroalimentacion') and not validated_data.get('explicacion'):
+            validated_data['explicacion'] = validated_data['retroalimentacion']
         try:
             pregunta = Pregunta(**validated_data)
             pregunta.full_clean(exclude=['opciones'])
@@ -117,6 +109,8 @@ class PreguntaSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         opciones_data = validated_data.pop('opciones', None)
+        if validated_data.get('retroalimentacion') and not validated_data.get('explicacion'):
+            validated_data['explicacion'] = validated_data['retroalimentacion']
         for campo, valor in validated_data.items():
             setattr(instance, campo, valor)
         try:
@@ -143,7 +137,9 @@ class PreguntaListSerializer(serializers.ModelSerializer):
             'categoria_nombre',
             'competencia',
             'competencia_nombre',
+            'texto_base',
             'enunciado',
+            'retroalimentacion',
             'tipo',
             'puntaje',
             'activa',

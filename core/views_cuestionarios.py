@@ -4,7 +4,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from .models import Cuestionario, CuestionarioPregunta, Intento, Pregunta
+from .models import Cuestionario, CuestionarioPregunta, Intento, Pregunta, RespuestaIntento
 from .permissions import PuedeConfigurarCuestionarios
 from .serializers_cuestionarios import (
     CuestionarioEstudianteSerializer,
@@ -49,9 +49,10 @@ class CuestionarioViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='activar')
     def activar(self, request, pk=None):
         cuestionario = self.get_object()
-        if cuestionario.cuestionario_preguntas.count() == 0:
+        errores = cuestionario.validar_preguntas()
+        if errores:
             return Response(
-                {'detail': 'No puedes activar un cuestionario sin preguntas asignadas.'},
+                {'detail': 'No puedes activar el cuestionario.', 'errores': errores},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         cuestionario.activo = True
@@ -84,6 +85,15 @@ class CuestionarioViewSet(viewsets.ModelViewSet):
             usuario=request.user,
             cuestionario=cuestionario,
         )
+        RespuestaIntento.objects.bulk_create([
+            RespuestaIntento(
+                intento=intento,
+                pregunta=relacion.pregunta,
+            )
+            for relacion in cuestionario.cuestionario_preguntas.select_related(
+                'pregunta',
+            )
+        ])
         return Response(
             {
                 'detail': 'Intento iniciado.',

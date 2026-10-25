@@ -5,11 +5,15 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.views import TokenRefreshView
+from rest_framework_simplejwt.tokens import UntypedToken
 
 from django.contrib.auth.models import Permission, User
+from django.utils import timezone
+from datetime import datetime, timezone as datetime_timezone
 
 from .permissions import HasManageRolesPermission, HasManageUsersPermission
-from .models import Rol
+from .models import Rol, SesionJWT
 from .serializers import (
     AuthTokenSerializer,
     PermissionSerializer,
@@ -20,6 +24,31 @@ from .serializers import (
 
 class AuthTokenView(TokenObtainPairView):
     serializer_class = AuthTokenSerializer
+
+
+class SessionTokenRefreshView(TokenRefreshView):
+    def post(self, request, *args, **kwargs):
+        response = super().post(request, *args, **kwargs)
+        if response.status_code != status.HTTP_200_OK:
+            return response
+        refresh_claims = UntypedToken(request.data['refresh'])
+        user = User.objects.get(pk=refresh_claims['user_id'])
+        session_id = refresh_claims['session_id']
+        for token_key in ('access', 'refresh'):
+            if token_key not in response.data:
+                continue
+            claims = UntypedToken(response.data[token_key])
+            from .models import SesionJWT
+            SesionJWT.objects.create(
+                sesion_id=session_id,
+                jti=claims['jti'],
+                usuario=user,
+                expira_en=datetime.fromtimestamp(
+                    claims['exp'],
+                    tz=datetime_timezone.utc,
+                ),
+            )
+        return response
 
 
 class LogoutView(APIView):
@@ -33,7 +62,17 @@ class LogoutView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         try:
-            RefreshToken(refresh_token).blacklist()
+            token = RefreshToken(refresh_token)
+            session_id = token.get('session_id')
+            SesionJWT.objects.filter(
+                sesion_id=session_id,
+                usuario=request.user,
+                revocada_en__isnull=True,
+            ).update(
+                revocada_en=timezone.now(),
+                motivo_revocacion='Cierre de sesión',
+            )
+            token.blacklist()
         except (KeyError, ValueError, TokenError):
             return Response(
                 {'detail': 'El refresh token no es válido.'},

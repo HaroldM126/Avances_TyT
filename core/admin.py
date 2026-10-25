@@ -10,6 +10,7 @@ from .models import (
     Pregunta,
     RespuestaIntento,
     Rol,
+    SesionJWT,
 )
 
 
@@ -54,7 +55,8 @@ class CuestionarioPreguntaInline(admin.TabularInline):
 class CuestionarioAdmin(admin.ModelAdmin):
     list_display = (
         'id', 'nombre', 'activo', 'fecha_apertura', 'fecha_cierre',
-        'duracion_minutos', 'max_intentos', 'nota_maxima',
+        'duracion_minutos', 'max_intentos', 'nota_maxima', 'nota_aprobar',
+        'permitir_revision',
     )
     list_filter = ('activo',)
     search_fields = ('nombre',)
@@ -71,3 +73,4 @@ class OpcionRespuestaAdmin(admin.ModelAdmin):
 admin.site.register(Intento)
 admin.site.register(RespuestaIntento)
 admin.site.register(Rol)
+admin.site.register(SesionJWT)

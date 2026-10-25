@@ -1,6 +1,8 @@
+from decimal import Decimal
+
 from rest_framework import serializers
 
-from .models import Cuestionario, CuestionarioPregunta
+from .models import Cuestionario, CuestionarioPregunta, OpcionRespuesta, Pregunta
 
 
 class CuestionarioPreguntaSerializer(serializers.ModelSerializer):
@@ -36,6 +38,8 @@ class CuestionarioSerializer(serializers.ModelSerializer):
             'duracion_minutos',
             'max_intentos',
             'nota_maxima',
+            'nota_aprobar',
+            'permitir_revision',
             'activo',
             'preguntas',
             'total_preguntas',
@@ -49,7 +53,14 @@ class CuestionarioSerializer(serializers.ModelSerializer):
         fecha_cierre = data.get('fecha_cierre', getattr(self.instance, 'fecha_cierre', None))
         duracion = data.get('duracion_minutos', getattr(self.instance, 'duracion_minutos', None))
         max_intentos = data.get('max_intentos', getattr(self.instance, 'max_intentos', None))
-        nota_maxima = data.get('nota_maxima', getattr(self.instance, 'nota_maxima', None))
+        nota_maxima = data.get(
+            'nota_maxima',
+            getattr(self.instance, 'nota_maxima', Decimal('5')),
+        )
+        nota_aprobar = data.get(
+            'nota_aprobar',
+            getattr(self.instance, 'nota_aprobar', Decimal('0')),
+        )
 
         if fecha_apertura and fecha_cierre and fecha_cierre <= fecha_apertura:
             raise serializers.ValidationError(
@@ -66,6 +77,12 @@ class CuestionarioSerializer(serializers.ModelSerializer):
         if nota_maxima is not None and nota_maxima <= 0:
             raise serializers.ValidationError(
                 {'nota_maxima': 'Debe ser mayor que cero.'}
+            )
+        if nota_aprobar is not None and (
+            nota_aprobar < 0 or nota_aprobar > nota_maxima
+        ):
+            raise serializers.ValidationError(
+                {'nota_aprobar': 'Debe estar entre cero y la calificación máxima.'}
             )
 
         preguntas = data.get('cuestionario_preguntas', None)
@@ -110,6 +127,8 @@ class CuestionarioListSerializer(serializers.ModelSerializer):
             'duracion_minutos',
             'max_intentos',
             'nota_maxima',
+            'nota_aprobar',
+            'permitir_revision',
             'activo',
             'total_preguntas',
         )
@@ -131,6 +150,8 @@ class CuestionarioEstudianteSerializer(serializers.ModelSerializer):
             'duracion_minutos',
             'max_intentos',
             'nota_maxima',
+            'nota_aprobar',
+            'permitir_revision',
             'total_preguntas',
         )
 
