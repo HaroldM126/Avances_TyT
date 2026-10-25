@@ -8,7 +8,8 @@ from .models import (
     Cuestionario,
     CuestionarioPregunta,
     Intento,
-    RespuestaIntento
+    RespuestaIntento,
+    Rol,
 )
 
 admin.site.register(Categoria)
@@ -18,3 +19,4 @@ admin.site.register(Cuestionario)
 admin.site.register(CuestionarioPregunta)
 admin.site.register(Intento)
 admin.site.register(RespuestaIntento)
+admin.site.register(Rol)
