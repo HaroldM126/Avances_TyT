@@ -12,6 +12,7 @@ from .auth_views import (
     UserDetailView,
     UserListCreateView,
 )
+from .views_cuestionarios import CuestionarioViewSet
 from .views_preguntas import (
     CategoriaViewSet,
     CompetenciaViewSet,
@@ -57,5 +58,6 @@ router = DefaultRouter()
 router.register('categorias', CategoriaViewSet, basename='categoria')
 router.register('competencias', CompetenciaViewSet, basename='competencia')
 router.register('preguntas', PreguntaViewSet, basename='pregunta')
+router.register('cuestionarios', CuestionarioViewSet, basename='cuestionario')
 
 urlpatterns += router.urls
