@@ -1,4 +1,5 @@
 from django.urls import path
+from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
 
 from .auth_views import (
@@ -10,6 +11,11 @@ from .auth_views import (
     RoleListCreateView,
     UserDetailView,
     UserListCreateView,
+)
+from .views_preguntas import (
+    CategoriaViewSet,
+    CompetenciaViewSet,
+    PreguntaViewSet,
 )
 
 urlpatterns = [
@@ -27,3 +33,10 @@ urlpatterns = [
     path('roles/<int:pk>/', RoleDetailView.as_view(), name='role_detail'),
     path('permissions/', PermissionListView.as_view(), name='permission_list'),
 ]
+
+router = DefaultRouter()
+router.register('categorias', CategoriaViewSet, basename='categoria')
+router.register('competencias', CompetenciaViewSet, basename='competencia')
+router.register('preguntas', PreguntaViewSet, basename='pregunta')
+
+urlpatterns += router.urls
