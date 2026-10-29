@@ -209,7 +209,7 @@ def validar_excel(file_obj):
             'enunciado': enunciado,
             'retroalimentacion': retroalimentacion,
             'explicacion': explicacion,
-            'puntaje': puntaje,
+            'puntaje': str(puntaje),
             'opciones': [
                 {'letra': letra, 'texto': opciones_raw[letra]}
                 for letra in LETRAS if opciones_raw[letra]

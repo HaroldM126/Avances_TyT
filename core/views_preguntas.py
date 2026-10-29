@@ -1,4 +1,5 @@
 import hashlib
+import io
 
 from django.db import transaction
 from django.http import HttpResponse
@@ -11,11 +12,13 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .excel_utils import (
+    COLUMNAS_ESPERADAS,
     FilaValidada,
     construir_plantilla,
     guardar_filas,
     validar_excel,
 )
+from openpyxl import Workbook
 from .models import (
     Categoria,
     Competencia,
@@ -170,6 +173,92 @@ class ImportacionDetailView(APIView):
                     'datos': fila.datos,
                 }
                 for fila in importacion.filas.all()
+            ],
+        })
+
+    def patch(self, request, pk):
+        try:
+            importacion = ImportacionPreguntas.objects.get(
+                pk=pk,
+                usuario=request.user,
+            )
+        except ImportacionPreguntas.DoesNotExist:
+            return Response(
+                {'detail': 'La importación no existe o no te pertenece.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        filas = request.data.get('filas')
+        if not isinstance(filas, list) or not filas:
+            return Response(
+                {'detail': 'Debes enviar al menos una fila para validar.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(COLUMNAS_ESPERADAS)
+        for fila in filas:
+            datos = fila.get('datos', {})
+            opciones = {
+                item.get('letra'): item.get('texto', '')
+                for item in datos.get('opciones', [])
+            }
+            sheet.append([
+                datos.get('categoria', ''),
+                datos.get('competencia', ''),
+                datos.get('tipo', ''),
+                datos.get('texto_base', ''),
+                datos.get('enunciado', ''),
+                datos.get('retroalimentacion', ''),
+                datos.get('explicacion', ''),
+                datos.get('puntaje', ''),
+                opciones.get('A', ''),
+                opciones.get('B', ''),
+                opciones.get('C', ''),
+                opciones.get('D', ''),
+                ','.join(datos.get('correctas', [])),
+            ])
+        buffer = io.BytesIO()
+        workbook.save(buffer)
+        buffer.seek(0)
+        resultado = validar_excel(buffer)
+        filas_validadas = resultado['filas']
+        importacion.filas.all().delete()
+        FilaImportacionPregunta.objects.bulk_create([
+            FilaImportacionPregunta(
+                importacion=importacion,
+                numero=fila.numero,
+                valida=fila.valida,
+                errores=fila.errores,
+                datos=fila.datos,
+            )
+            for fila in filas_validadas
+        ])
+        validas = sum(fila.valida for fila in filas_validadas)
+        importacion.total = len(filas_validadas)
+        importacion.validas = validas
+        importacion.invalidas = len(filas_validadas) - validas
+        importacion.estado = (
+            ImportacionPreguntas.ESTADO_PREVIA
+            if importacion.invalidas == 0
+            else ImportacionPreguntas.ESTADO_ERROR
+        )
+        importacion.error_global = resultado['error_global'] or ''
+        importacion.save(update_fields=(
+            'total', 'validas', 'invalidas', 'estado', 'error_global',
+        ))
+        return Response({
+            'importacion_id': importacion.id,
+            'total': importacion.total,
+            'validas': importacion.validas,
+            'invalidas': importacion.invalidas,
+            'filas': [
+                {
+                    'numero': fila.numero,
+                    'valida': fila.valida,
+                    'errores': fila.errores,
+                    'datos': fila.datos,
+                }
+                for fila in filas_validadas
             ],
         })
 
