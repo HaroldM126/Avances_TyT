@@ -26,6 +26,11 @@ class RespuestaIntentoSerializer(serializers.ModelSerializer):
 
 
 class IntentoSerializer(serializers.ModelSerializer):
+    estudiante_nombre = serializers.SerializerMethodField()
+    estudiante_usuario = serializers.CharField(
+        source='usuario.username',
+        read_only=True,
+    )
     cuestionario_nombre = serializers.CharField(
         source='cuestionario.nombre',
         read_only=True,
@@ -56,6 +61,15 @@ class IntentoSerializer(serializers.ModelSerializer):
         read_only=True,
     )
     preguntas_sin_responder = serializers.SerializerMethodField()
+    duracion_minutos = serializers.IntegerField(
+        source='cuestionario.duracion_minutos',
+        read_only=True,
+        allow_null=True,
+    )
+    revision_habilitada = serializers.BooleanField(
+        source='cuestionario.permitir_revision',
+        read_only=True,
+    )
 
     class Meta:
         model = Intento
@@ -63,6 +77,8 @@ class IntentoSerializer(serializers.ModelSerializer):
             'id',
             'cuestionario',
             'cuestionario_nombre',
+            'estudiante_nombre',
+            'estudiante_usuario',
             'fecha_inicio',
             'fecha_envio',
             'enviado',
@@ -73,9 +89,15 @@ class IntentoSerializer(serializers.ModelSerializer):
             'nota_aprobar',
             'aprobado',
             'preguntas_sin_responder',
+            'duracion_minutos',
+            'revision_habilitada',
             'preguntas',
             'respuestas',
         )
+
+    def get_estudiante_nombre(self, obj):
+        nombre = f'{obj.usuario.first_name} {obj.usuario.last_name}'.strip()
+        return nombre or obj.usuario.username
 
     def get_preguntas(self, obj):
         preguntas = Pregunta.objects.filter(

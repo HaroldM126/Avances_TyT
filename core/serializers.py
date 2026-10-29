@@ -99,14 +99,25 @@ class UserSerializer(serializers.ModelSerializer):
         required=False,
     )
     password = serializers.CharField(write_only=True, required=False, min_length=8)
+    permissions = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = User
         fields = (
             'id', 'username', 'email', 'first_name', 'last_name',
             'is_active', 'is_staff', 'roles', 'password',
+            'permissions',
         )
         read_only_fields = ('id', 'is_staff')
+
+    def get_permissions(self, obj):
+        if obj.is_superuser:
+            return ['*']
+        return list(
+            obj.groups.filter(rol__activo=True)
+            .values_list('permissions__codename', flat=True)
+            .distinct()
+        )
 
     def create(self, validated_data):
         groups = validated_data.pop('groups', [])
