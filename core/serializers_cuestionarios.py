@@ -32,6 +32,7 @@ class CuestionarioSerializer(serializers.ModelSerializer):
         fields = (
             'id',
             'nombre',
+            'curso',
             'fecha_creacion',
             'fecha_apertura',
             'fecha_cierre',
@@ -122,6 +123,7 @@ class CuestionarioListSerializer(serializers.ModelSerializer):
         fields = (
             'id',
             'nombre',
+            'curso',
             'fecha_apertura',
             'fecha_cierre',
             'duracion_minutos',
@@ -145,6 +147,7 @@ class CuestionarioEstudianteSerializer(serializers.ModelSerializer):
         fields = (
             'id',
             'nombre',
+            'curso',
             'fecha_apertura',
             'fecha_cierre',
             'duracion_minutos',

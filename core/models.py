@@ -38,6 +38,65 @@ class Rol(models.Model):
         return self.grupo.name
 
 
+class PeriodoAcademico(models.Model):
+    anio = models.PositiveSmallIntegerField()
+    nombre = models.CharField(max_length=20, unique=True)
+
+    class Meta:
+        ordering = ('-anio', 'nombre')
+
+    def __str__(self):
+        return self.nombre
+
+
+class CursoGrupo(models.Model):
+    nombre = models.CharField(max_length=100)
+    periodo = models.ForeignKey(
+        PeriodoAcademico,
+        on_delete=models.PROTECT,
+        related_name='cursos',
+    )
+
+    class Meta:
+        ordering = ('periodo__anio', 'nombre')
+        constraints = [
+            models.UniqueConstraint(
+                fields=('periodo', 'nombre'),
+                name='uq_curso_periodo_nombre',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.nombre} ({self.periodo})'
+
+
+class Matricula(models.Model):
+    estudiante = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='matriculas',
+    )
+    curso = models.ForeignKey(
+        CursoGrupo,
+        on_delete=models.PROTECT,
+        related_name='matriculas',
+    )
+    identificacion = models.CharField(max_length=40, blank=True)
+    activa = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ('curso__nombre', 'estudiante__last_name', 'estudiante__first_name')
+        constraints = [
+            models.UniqueConstraint(
+                fields=('estudiante', 'curso'),
+                name='uq_matricula_estudiante_curso',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.estudiante} - {self.curso}'
+
+
 class SesionJWT(models.Model):
     sesion_id = models.UUIDField()
     jti = models.CharField(max_length=255, unique=True)
@@ -162,6 +221,13 @@ class CuestionarioQuerySet(models.QuerySet):
 
 class Cuestionario(models.Model):
     nombre = models.CharField(max_length=100)
+    curso = models.ForeignKey(
+        CursoGrupo,
+        on_delete=models.SET_NULL,
+        related_name='cuestionarios',
+        null=True,
+        blank=True,
+    )
     fecha_creacion = models.DateTimeField(auto_now_add=True)
     fecha_apertura = models.DateTimeField(null=True, blank=True)
     fecha_cierre = models.DateTimeField(null=True, blank=True)
@@ -182,6 +248,11 @@ class Cuestionario(models.Model):
             ('manage_question_bank', 'Puede administrar el banco de preguntas'),
             ('configure_quizzes', 'Puede configurar cuestionarios'),
             ('view_results', 'Puede consultar resultados'),
+            ('ver_reportes', 'Puede consultar reportes académicos'),
+            (
+                'ver_identificacion_estudiante',
+                'Puede consultar identificaciones de estudiantes',
+            ),
         ]
 
     def clean(self):
@@ -296,6 +367,20 @@ class Intento(models.Model):
     )
     usuario = models.ForeignKey(User, on_delete=models.CASCADE)
     cuestionario = models.ForeignKey(Cuestionario, on_delete=models.CASCADE)
+    curso = models.ForeignKey(
+        CursoGrupo,
+        on_delete=models.SET_NULL,
+        related_name='intentos',
+        null=True,
+        blank=True,
+    )
+    periodo = models.ForeignKey(
+        PeriodoAcademico,
+        on_delete=models.SET_NULL,
+        related_name='intentos',
+        null=True,
+        blank=True,
+    )
     fecha_inicio = models.DateTimeField(auto_now_add=True)
     puntaje = models.DecimalField(max_digits=5, decimal_places=2, default=0)
     fecha_envio = models.DateTimeField(null=True, blank=True)

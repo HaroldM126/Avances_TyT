@@ -84,6 +84,12 @@ class CuestionarioViewSet(viewsets.ModelViewSet):
         intento = Intento.objects.create(
             usuario=request.user,
             cuestionario=cuestionario,
+            curso=cuestionario.curso,
+            periodo=(
+                cuestionario.curso.periodo
+                if cuestionario.curso_id
+                else None
+            ),
         )
         RespuestaIntento.objects.bulk_create([
             RespuestaIntento(

@@ -1,5 +1,10 @@
 import { apiRequest, descargarArchivo } from './client'
-import { obtenerToken } from './auth'
+import {
+  cerrarSesionLocal,
+  guardarTokens,
+  obtenerRefreshToken,
+  obtenerToken,
+} from './auth'
 
 export const obtenerMe = () => apiRequest('/api/auth/me/')
 export const obtenerIntento = (id) => apiRequest(`/api/intentos/${id}/`)
@@ -66,6 +71,55 @@ export const guardarRol = (data, id) =>
 export const eliminarRol = (id) =>
   apiRequest(`/api/roles/${id}/`, { method: 'DELETE' })
 export const obtenerPermisos = () => apiRequest('/api/permissions/')
+export const obtenerCursosAcademicos = () => apiRequest('/api/cursos-academicos/')
+const queryParams = (params = {}) => {
+  const search = new URLSearchParams()
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== '' && value !== null && value !== undefined) search.set(key, value)
+  })
+  return search.toString()
+}
+export const obtenerOpcionesReportes = (params = {}) =>
+  apiRequest(`/api/reportes/filtros/${queryParams(params) ? `?${queryParams(params)}` : ''}`)
+export const obtenerConsultaReporte = (params = {}) =>
+  apiRequest(`/api/reportes/consultas/?${queryParams(params)}`)
+export const obtenerHistorialReporte = (id, params = {}) =>
+  apiRequest(`/api/reportes/historial/${id}/?${queryParams(params)}`)
+export async function exportarReporte(tipo, params = {}) {
+  const url = `/api/reportes/exportar/${tipo}/?${queryParams(params)}`
+  const request = (token) => fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  let response = await request(obtenerToken())
+  if (response.status === 401 && obtenerRefreshToken()) {
+    const refreshed = await fetch('/api/auth/token/refresh/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh: obtenerRefreshToken() }),
+    })
+    if (!refreshed.ok) {
+      cerrarSesionLocal()
+      throw new Error('Tu sesión terminó. Inicia sesión nuevamente.')
+    }
+    const tokens = await refreshed.json()
+    guardarTokens(tokens)
+    response = await request(tokens.access)
+  }
+  if (response.status === 401) {
+    cerrarSesionLocal()
+    throw new Error('Tu sesión terminó. Inicia sesión nuevamente.')
+  }
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}))
+    throw new Error(payload.detail || 'No pudimos descargar el archivo.')
+  }
+  const disposition = response.headers.get('Content-Disposition') || ''
+  const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1]
+  return {
+    blob: await response.blob(),
+    filename: filename || `reporte_${tipo}.xlsx`,
+  }
+}
 export const obtenerImportaciones = () => apiRequest('/api/preguntas/importar/')
 export const obtenerImportacion = (id) =>
   apiRequest(`/api/preguntas/importar/${id}/`)

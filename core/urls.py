@@ -23,6 +23,13 @@ from .views_preguntas import (
     PreguntaViewSet,
 )
 from .views_intentos import IntentoViewSet
+from .views_reportes import (
+    ConsultaReporteView,
+    CursosAcademicosView,
+    ExportarReporteView,
+    FiltrosReporteView,
+    HistorialEstudianteView,
+)
 
 urlpatterns = [
     path('auth/token/', AuthTokenView.as_view(), name='auth_token'),
@@ -64,6 +71,24 @@ urlpatterns = [
         ImportacionDetailView.as_view(),
         name='preguntas_importar_detail',
     ),
+    path('reportes/filtros/', FiltrosReporteView.as_view(), name='reportes_filtros'),
+    path(
+        'cursos-academicos/',
+        CursosAcademicosView.as_view(),
+        name='cursos_academicos',
+    ),
+    path('reportes/consultas/', ConsultaReporteView.as_view(), name='reportes_consultas'),
+    path(
+        'reportes/historial/<int:estudiante_id>/',
+        HistorialEstudianteView.as_view(),
+        name='reportes_historial',
+    ),
+    path(
+        'reportes/exportar/<str:tipo>/',
+        ExportarReporteView.as_view(),
+        name='reportes_exportar',
+    ),
+    path('reportes/', ConsultaReporteView.as_view(), name='reportes'),
 ]
 
 router = DefaultRouter()

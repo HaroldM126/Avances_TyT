@@ -12,6 +12,8 @@ ROLE_PERMISSION_CODENAMES = (
     'manage_question_bank',
     'configure_quizzes',
     'view_results',
+    'ver_reportes',
+    'ver_identificacion_estudiante',
 )
 
 
