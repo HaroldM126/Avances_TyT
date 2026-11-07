@@ -9,6 +9,7 @@ from .models import (
     Intento,
     Matricula,
     OpcionRespuesta,
+    PerfilUsuario,
     PeriodoAcademico,
     Pregunta,
     RespuestaIntento,
@@ -78,6 +79,7 @@ admin.site.register(Intento)
 admin.site.register(RespuestaIntento)
 admin.site.register(Rol)
 admin.site.register(SesionJWT)
+admin.site.register(PerfilUsuario)
 
 
 @admin.register(PeriodoAcademico)

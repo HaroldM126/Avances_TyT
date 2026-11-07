@@ -1,4 +1,6 @@
 from django.contrib.auth.models import Group, Permission, User
+from django.contrib.auth.password_validation import validate_password
+from django.db import transaction
 from datetime import datetime, timezone as datetime_timezone
 
 from django.utils import timezone
@@ -40,11 +42,104 @@ class AuthTokenSerializer(TokenObtainPairSerializer):
         return data
 
 
+class InitialAdminSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(
+        write_only=True,
+        min_length=8,
+        style={'input_type': 'password'},
+    )
+    password_confirmation = serializers.CharField(
+        write_only=True,
+        min_length=8,
+        style={'input_type': 'password'},
+    )
+
+    class Meta:
+        model = User
+        fields = (
+            'username',
+            'email',
+            'first_name',
+            'last_name',
+            'password',
+            'password_confirmation',
+        )
+        extra_kwargs = {
+            'email': {'required': True},
+        }
+
+    def validate_username(self, value):
+        username = value.strip()
+        if not username:
+            raise serializers.ValidationError(
+                'El nombre de usuario es obligatorio.',
+            )
+        if User.objects.filter(username__iexact=username).exists():
+            raise serializers.ValidationError(
+                'Ya existe una cuenta con este nombre de usuario.',
+            )
+        return username
+
+    def validate_email(self, value):
+        email = value.strip().lower()
+        if User.objects.filter(email__iexact=email).exists():
+            raise serializers.ValidationError(
+                'Ya existe una cuenta con este correo electrónico.',
+            )
+        return email
+
+    def validate(self, data):
+        if data['password'] != data['password_confirmation']:
+            raise serializers.ValidationError({
+                'password_confirmation': 'Las contraseñas no coinciden.',
+            })
+        candidate = User(
+            username=data.get('username', ''),
+            email=data.get('email', ''),
+            first_name=data.get('first_name', ''),
+            last_name=data.get('last_name', ''),
+        )
+        validate_password(data['password'], candidate)
+        return data
+
+    @transaction.atomic
+    def create(self, validated_data):
+        if User.objects.filter(is_superuser=True).exists():
+            raise serializers.ValidationError({
+                'detail': 'La configuración del administrador inicial ya fue completada.',
+            })
+        validated_data.pop('password_confirmation')
+        password = validated_data.pop('password')
+        user = User(is_staff=True, is_superuser=True, **validated_data)
+        user.set_password(password)
+        user.save()
+        return user
+
+
 class PermissionSerializer(serializers.ModelSerializer):
+    PERMISSION_LABELS = {
+        'add_cuestionario': 'Crear cuestionarios',
+        'change_cuestionario': 'Editar cuestionarios',
+        'delete_cuestionario': 'Eliminar cuestionarios',
+        'view_cuestionario': 'Consultar cuestionarios',
+        'manage_users': 'Administrar usuarios',
+        'manage_roles': 'Administrar roles y permisos',
+        'manage_question_bank': 'Administrar banco de preguntas',
+        'configure_quizzes': 'Configurar cuestionarios',
+        'view_results': 'Consultar resultados',
+        'ver_reportes': 'Consultar reportes académicos',
+        'ver_identificacion_estudiante': 'Consultar identificaciones de estudiantes',
+    }
+
+    name = serializers.SerializerMethodField()
+
     class Meta:
         model = Permission
         fields = ('id', 'name', 'codename', 'content_type')
         read_only_fields = fields
+
+    def get_name(self, obj):
+        return self.PERMISSION_LABELS.get(obj.codename, obj.name)
 
 
 class RoleSerializer(serializers.Serializer):
@@ -100,13 +195,15 @@ class UserSerializer(serializers.ModelSerializer):
     )
     password = serializers.CharField(write_only=True, required=False, min_length=8)
     permissions = serializers.SerializerMethodField(read_only=True)
+    numero_identidad = serializers.SerializerMethodField(read_only=True)
+    cursos = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = User
         fields = (
             'id', 'username', 'email', 'first_name', 'last_name',
             'is_active', 'is_staff', 'roles', 'password',
-            'permissions',
+            'permissions', 'numero_identidad', 'cursos',
         )
         read_only_fields = ('id', 'is_staff')
 
@@ -117,6 +214,17 @@ class UserSerializer(serializers.ModelSerializer):
             obj.groups.filter(rol__activo=True)
             .values_list('permissions__codename', flat=True)
             .distinct()
+        )
+
+    def get_numero_identidad(self, obj):
+        return getattr(getattr(obj, 'perfil', None), 'numero_identidad', '')
+
+    def get_cursos(self, obj):
+        return list(
+            obj.matriculas.filter(activa=True).values_list(
+                'curso__nombre',
+                flat=True,
+            ),
         )
 
     def create(self, validated_data):

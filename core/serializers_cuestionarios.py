@@ -75,9 +75,11 @@ class CuestionarioSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {'max_intentos': 'Debe ser al menos 1.'}
             )
-        if nota_maxima is not None and nota_maxima <= 0:
+        if nota_maxima is not None and (
+            nota_maxima <= 0 or nota_maxima > Decimal('5.00')
+        ):
             raise serializers.ValidationError(
-                {'nota_maxima': 'Debe ser mayor que cero.'}
+                {'nota_maxima': 'Debe estar entre cero y 5.00.'}
             )
         if nota_aprobar is not None and (
             nota_aprobar < 0 or nota_aprobar > nota_maxima
@@ -141,6 +143,11 @@ class CuestionarioListSerializer(serializers.ModelSerializer):
 
 class CuestionarioEstudianteSerializer(serializers.ModelSerializer):
     total_preguntas = serializers.SerializerMethodField(read_only=True)
+    curso_nombre = serializers.CharField(source='curso.nombre', read_only=True)
+    intentos_realizados = serializers.SerializerMethodField()
+    intentos_restantes = serializers.SerializerMethodField()
+    puede_iniciar = serializers.SerializerMethodField()
+    motivo_bloqueo = serializers.SerializerMethodField()
 
     class Meta:
         model = Cuestionario
@@ -148,6 +155,7 @@ class CuestionarioEstudianteSerializer(serializers.ModelSerializer):
             'id',
             'nombre',
             'curso',
+            'curso_nombre',
             'fecha_apertura',
             'fecha_cierre',
             'duracion_minutos',
@@ -156,7 +164,27 @@ class CuestionarioEstudianteSerializer(serializers.ModelSerializer):
             'nota_aprobar',
             'permitir_revision',
             'total_preguntas',
+            'intentos_realizados',
+            'intentos_restantes',
+            'puede_iniciar',
+            'motivo_bloqueo',
         )
 
     def get_total_preguntas(self, obj):
         return obj.cuestionario_preguntas.count()
+
+    def get_intentos_realizados(self, obj):
+        user = self.context['request'].user
+        return obj.intento_set.filter(usuario=user).count()
+
+    def get_puede_iniciar(self, obj):
+        return obj.puede_iniciar(self.context['request'].user)[0]
+
+    def get_motivo_bloqueo(self, obj):
+        return obj.puede_iniciar(self.context['request'].user)[1]
+
+    def get_intentos_restantes(self, obj):
+        return max(
+            0,
+            obj.max_intentos - self.get_intentos_realizados(obj),
+        )

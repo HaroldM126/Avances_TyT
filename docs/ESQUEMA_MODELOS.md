@@ -3,6 +3,8 @@
 ## Modelos y relaciones relevantes
 
 - `User` (Django): cuenta del estudiante, con nombre, apellidos y usuario.
+- `PerfilUsuario`: identificación institucional única asociada a cualquier
+  usuario registrado.
 - `PeriodoAcademico`: año (`anio`) y etiqueta de período (por ejemplo, `2026-1`).
 - `CursoGrupo`: grupo académico perteneciente a un período.
 - `Matricula`: relación estudiante-curso, con matrícula activa y un campo opcional
@@ -41,6 +43,7 @@ global único.
 
 ```mermaid
 erDiagram
+    USER ||--o| PERFIL_USUARIO : identifica
     USER ||--o{ MATRICULA : se_matricula
     CURSO_GRUPO ||--o{ MATRICULA : agrupa
     PERIODO_ACADEMICO ||--o{ CURSO_GRUPO : contiene
@@ -69,7 +72,7 @@ erDiagram
 | Estudiante | Ya existía como `User` | Nombre, apellidos y usuario |
 | Eje temático | Existía `Competencia`, relación opcional en pregunta | Se filtra por competencia |
 | Curso/período de intento | No existían | FK nullable en `Intento`, ambas asignadas al iniciar |
-| Identificación | No existía | Texto opcional en `Matricula`; solo se expone con permiso |
+| Identificación | No existía | Única en `PerfilUsuario`; se copia a `Matricula` para estudiantes |
 
 Las nuevas claves foráneas que tocan datos históricos son nullable. No se
 rellenan ni se alteran respuestas, calificaciones o intentos históricos.

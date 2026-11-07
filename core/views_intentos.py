@@ -90,7 +90,10 @@ class IntentoViewSet(viewsets.ReadOnlyModelViewSet):
             respuesta.opcion_id = opcion_id
         else:
             respuesta.opcion = None
-        respuesta.save(update_fields=('opcion',))
+        marcar_revision = request.data.get('marcada_revision')
+        if marcar_revision is not None:
+            respuesta.marcada_revision = bool(marcar_revision)
+        respuesta.save(update_fields=('opcion', 'marcada_revision'))
         return Response(
             {
                 'detail': 'Respuesta guardada.',

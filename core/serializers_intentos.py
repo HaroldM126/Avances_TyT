@@ -22,7 +22,7 @@ class RespuestaIntentoSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = RespuestaIntento
-        fields = ('pregunta', 'opcion', 'opcion_texto')
+        fields = ('pregunta', 'opcion', 'opcion_texto', 'marcada_revision')
 
 
 class IntentoSerializer(serializers.ModelSerializer):
@@ -70,6 +70,7 @@ class IntentoSerializer(serializers.ModelSerializer):
         source='cuestionario.permitir_revision',
         read_only=True,
     )
+    fecha_limite = serializers.SerializerMethodField()
 
     class Meta:
         model = Intento
@@ -91,6 +92,7 @@ class IntentoSerializer(serializers.ModelSerializer):
             'preguntas_sin_responder',
             'duracion_minutos',
             'revision_habilitada',
+            'fecha_limite',
             'preguntas',
             'respuestas',
         )
@@ -110,6 +112,10 @@ class IntentoSerializer(serializers.ModelSerializer):
 
     def get_preguntas_sin_responder(self, obj):
         return obj.respuestaintento_set.filter(opcion__isnull=True).count()
+
+    def get_fecha_limite(self, obj):
+        limite = obj.fecha_limite()
+        return limite.isoformat() if limite else None
 
 
 class RevisionRespuestaSerializer(serializers.ModelSerializer):

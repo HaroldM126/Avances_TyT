@@ -28,6 +28,7 @@ SECRET_KEY = os.getenv(
     'DJANGO_SECRET_KEY',
     'django-insecure-development-key-change-in-production',
 )
+INITIAL_ADMIN_SETUP_TOKEN = os.getenv('INITIAL_ADMIN_SETUP_TOKEN', '')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
@@ -109,10 +110,8 @@ if os.getenv('DJANGO_USE_SQLITE') == '1':
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
 
 AUTH_PASSWORD_VALIDATORS = [
-    {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
     {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
-    {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
-    {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
+    {'NAME': 'core.password_validation.LetterAndNumberPasswordValidator'},
 ]
 
 

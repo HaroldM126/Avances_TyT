@@ -21,12 +21,24 @@ La aplicación usa MySQL por defecto. Configura `MYSQL_DATABASE`, `MYSQL_USER`,
 `DJANGO_SECRET_KEY` y `DJANGO_ALLOWED_HOSTS`; para pruebas locales sin MySQL
 puedes usar `DJANGO_USE_SQLITE=1`.
 
+Configuración del administrador inicial
+
+Para crear el primer superusuario desde la pantalla de acceso, configura
+`INITIAL_ADMIN_SETUP_TOKEN` en el entorno antes de iniciar Django. El formulario
+requiere ese token, valida la contraseña y solo funciona mientras no exista
+ningún superusuario. Después de crear el administrador, la operación queda
+bloqueada; los estudiantes, docentes y demás usuarios deben ser creados desde
+la administración autenticada.
+
 Autenticación y roles
 
 - `POST /api/auth/token/`: inicia sesión y devuelve tokens `access` y `refresh`.
 - `POST /api/auth/token/refresh/`: renueva el token de acceso.
 - `POST /api/auth/logout/`: invalida el refresh token enviado.
 - `GET /api/auth/me/`: consulta el usuario autenticado, sus roles y permisos.
+- El perfil de la barra superior muestra nombres, apellidos, cédula y correo;
+  desde allí se cambia la contraseña y se cierra sesión. Las contraseñas
+  requieren mínimo 8 caracteres, al menos una letra y un número.
 - `/api/users/`: administración de usuarios, disponible para quienes tienen `core.manage_users`.
 - `/api/roles/`: administración de roles personalizados y permisos, disponible para quienes tienen `core.manage_roles`.
 - `/api/intentos/`: consulta los intentos propios; quienes tienen `core.view_results` pueden consultar todos.
@@ -43,14 +55,26 @@ restricciones se validan en el servidor, no solo en la interfaz. Cada rol
 también tiene el campo `activo`; los roles desactivados no pueden asignarse ni
 conceden permisos aunque el usuario conserve el grupo.
 
+Registro institucional
+
+Los usuarios con permiso `manage_users` pueden registrar estudiantes y docentes
+desde Gestión. El registro de estudiantes exige curso/grupo y crea la matrícula;
+el registro de docentes no solicita curso. En ambos casos la cédula es numérica,
+única y se usa como nombre de usuario, los nombres y apellidos solo aceptan
+caracteres alfabéticos, y el rol se asigna automáticamente en el servidor.
+
 Cuestionarios e intentos
 
 Los cuestionarios admiten fechas de apertura y cierre, tiempo límite,
 intentos permitidos, calificación máxima, nota para aprobar y configuración
-de revisión. Al iniciar un intento se crea una respuesta persistente para
-cada pregunta; una respuesta sin opción representa una pregunta sin
-responder. La calificación se calcula con `Decimal` y se expone como
-`puntaje` y `calificacion_final`.
+de revisión. Los estudiantes solo reciben cuestionarios de sus matrículas;
+el servidor bloquea los que estén fuera de horario o hayan agotado sus
+intentos. Al iniciar un intento se crea una respuesta persistente para cada
+pregunta; una respuesta sin opción representa una pregunta sin responder y
+puede marcarse para revisión. El intento se cierra al llegar el primero entre
+la hora de cierre y el tiempo límite, conservando las respuestas guardadas.
+La calificación se calcula con `Decimal` y se expone como `puntaje` y
+`calificacion_final`.
 
 Las preguntas incluyen texto base, enunciado, opciones, una única respuesta
 correcta, retroalimentación y puntaje. Las filas inválidas de una importación

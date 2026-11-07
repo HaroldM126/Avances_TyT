@@ -38,6 +38,18 @@ class Rol(models.Model):
         return self.grupo.name
 
 
+class PerfilUsuario(models.Model):
+    usuario = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name='perfil',
+    )
+    numero_identidad = models.CharField(max_length=20, unique=True)
+
+    def __str__(self):
+        return f'{self.usuario.username} - {self.numero_identidad}'
+
+
 class PeriodoAcademico(models.Model):
     anio = models.PositiveSmallIntegerField()
     nombre = models.CharField(max_length=20, unique=True)
@@ -262,9 +274,11 @@ class Cuestionario(models.Model):
                 raise ValidationError({
                     'fecha_cierre': 'La fecha de cierre debe ser posterior a la de apertura.',
                 })
-        if self.nota_maxima <= 0:
+        if self.nota_maxima <= 0 or self.nota_maxima > Decimal('5.00'):
             raise ValidationError({
-                'nota_maxima': 'La calificación máxima debe ser mayor que cero.',
+                'nota_maxima': (
+                    'La calificación máxima debe estar entre cero y 5.00.'
+                ),
             })
         if self.nota_aprobar < 0 or self.nota_aprobar > self.nota_maxima:
             raise ValidationError({
@@ -295,6 +309,12 @@ class Cuestionario(models.Model):
             return False, 'El cuestionario ya cerró.'
         if not self.cuestionario_preguntas.exists():
             return False, 'El cuestionario no tiene preguntas asignadas.'
+        if self.curso_id and usuario.groups.filter(name='Estudiante').exists() and not Matricula.objects.filter(
+            estudiante=usuario,
+            curso=self.curso,
+            activa=True,
+        ).exists():
+            return False, 'No estás matriculado en el curso de este cuestionario.'
         intentos_previos = self.intento_set.filter(usuario=usuario).count()
         if intentos_previos >= self.max_intentos:
             return False, 'Has agotado el número de intentos permitidos.'
@@ -438,6 +458,7 @@ class RespuestaIntento(models.Model):
         null=True,
         blank=True,
     )
+    marcada_revision = models.BooleanField(default=False)
 
     class Meta:
         constraints = [

@@ -1,5 +1,5 @@
 from rest_framework import generics, status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -9,6 +9,7 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from rest_framework_simplejwt.tokens import UntypedToken
 
 from django.contrib.auth.models import Permission, User
+from django.conf import settings
 from django.utils import timezone
 from datetime import datetime, timezone as datetime_timezone
 
@@ -16,14 +17,34 @@ from .permissions import HasManageRolesPermission, HasManageUsersPermission
 from .models import Rol, SesionJWT
 from .serializers import (
     AuthTokenSerializer,
+    InitialAdminSerializer,
     PermissionSerializer,
     RoleSerializer,
     UserSerializer,
 )
+from .serializers_password import ChangePasswordSerializer
 
 
 class AuthTokenView(TokenObtainPairView):
     serializer_class = AuthTokenSerializer
+
+
+class InitialAdminView(generics.CreateAPIView):
+    serializer_class = InitialAdminSerializer
+    permission_classes = (AllowAny,)
+
+    def create(self, request, *args, **kwargs):
+        setup_token = request.headers.get('X-Initial-Admin-Token', '')
+        if (
+            not settings.INITIAL_ADMIN_SETUP_TOKEN
+            or setup_token != settings.INITIAL_ADMIN_SETUP_TOKEN
+            or User.objects.filter(is_superuser=True).exists()
+        ):
+            return Response(
+                {'detail': 'La configuración del administrador inicial no está disponible.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return super().create(request, *args, **kwargs)
 
 
 class SessionTokenRefreshView(TokenRefreshView):
@@ -87,6 +108,20 @@ class MeView(generics.RetrieveAPIView):
 
     def get_object(self):
         return self.request.user
+
+
+class ChangePasswordView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request):
+        serializer = ChangePasswordSerializer(
+            data=request.data,
+            context={'request': request},
+        )
+        serializer.is_valid(raise_exception=True)
+        request.user.set_password(serializer.validated_data['new_password'])
+        request.user.save(update_fields=('password',))
+        return Response({'detail': 'Contraseña actualizada correctamente.'})
 
 
 class UserListCreateView(generics.ListCreateAPIView):

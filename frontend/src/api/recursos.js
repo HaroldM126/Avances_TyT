@@ -17,6 +17,8 @@ export const enviarIntento = (id) =>
   apiRequest(`/api/intentos/${id}/enviar/`, { method: 'POST', body: '{}' })
 export const obtenerRevision = (id) => apiRequest(`/api/intentos/${id}/revision/`)
 export const obtenerIntentos = () => apiRequest('/api/intentos/')
+export const marcarRespuesta = (id, pregunta, marcada_revision) =>
+  guardarRespuesta(id, { pregunta, marcada_revision })
 
 export const obtenerPreguntas = (params = '') => apiRequest(`/api/preguntas/${params}`)
 export const obtenerPregunta = (id) => apiRequest(`/api/preguntas/${id}/`)
@@ -60,6 +62,16 @@ export const obtenerUsuarios = () => apiRequest('/api/users/')
 export const guardarUsuario = (data, id) =>
   apiRequest(id ? `/api/users/${id}/` : '/api/users/', {
     method: id ? 'PATCH' : 'POST',
+    body: JSON.stringify(data),
+  })
+export const registrarEstudiante = (data) =>
+  apiRequest('/api/users/estudiantes/', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+export const registrarDocente = (data) =>
+  apiRequest('/api/users/docentes/', {
+    method: 'POST',
     body: JSON.stringify(data),
   })
 export const obtenerRoles = () => apiRequest('/api/roles/')

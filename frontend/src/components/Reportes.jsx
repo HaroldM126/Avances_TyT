@@ -350,7 +350,7 @@ export default function Reportes({ canSeeIdentification, isStudent }) {
             onClick={download}
             disabled={downloading || (type === 'historial' && !filters.estudiante && !isStudent)}
           >
-            {downloading ? 'Preparando Excel…' : 'Exportar a Excel'}
+            <span className="button-icon" aria-hidden="true">↓</span>{downloading ? 'Preparando Excel…' : 'Exportar a Excel'}
           </button>
         </div>
       </form>

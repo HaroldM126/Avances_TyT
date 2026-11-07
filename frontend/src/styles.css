@@ -52,6 +52,7 @@ input:focus-visible {
 }
 
 .topbar {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -91,6 +92,122 @@ input:focus-visible {
   display: flex;
   align-items: center;
   gap: 16px;
+}
+
+.profile-popover {
+  position: absolute;
+  z-index: 10;
+  top: 64px;
+  right: 20px;
+  width: min(360px, calc(100vw - 40px));
+  padding: 20px;
+  border: 1px solid var(--blue-line);
+  background: var(--white);
+  box-shadow: 0 12px 30px rgb(18 74 105 / 14%);
+}
+
+.profile-details {
+  display: grid;
+  gap: 8px;
+  margin: 18px 0;
+}
+
+.profile-details div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid #edf1f2;
+  padding-bottom: 6px;
+}
+
+.profile-details dt {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.profile-details dd {
+  margin: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.profile-logout {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 16px;
+}
+
+.quiz-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 32px;
+}
+
+.quiz-filters input,
+.quiz-filters select {
+  min-height: 42px;
+  border: 1px solid var(--blue-line);
+  padding: 8px 12px;
+  background: var(--white);
+}
+
+.quiz-row--blocked {
+  border-left: 4px solid #d98b8b;
+  background: #fff7f7;
+  padding-left: 16px;
+}
+
+.quiz-status {
+  margin: 8px 0 0;
+  color: var(--error);
+  font-size: 0.875rem;
+}
+
+.quiz-row:not(.quiz-row--blocked) .quiz-status {
+  color: var(--success);
+}
+
+.student-results {
+  margin-top: 56px;
+  border-top: 1px solid var(--blue-line);
+  padding-top: 28px;
+}
+
+.student-results--hidden {
+  display: none;
+}
+
+.submit-dialog {
+  text-align: left;
+}
+
+.submit-dialog__icon {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  margin-bottom: 16px;
+  border-radius: 50%;
+  color: var(--blue-deep);
+  background: var(--blue-soft);
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+
+.review-toggle {
+  margin-top: 20px;
+  border: 1px solid var(--blue-line);
+  padding: 8px 12px;
+  color: var(--blue);
+  background: var(--white);
+}
+
+.review-toggle--active {
+  border-color: #d7a338;
+  color: #8a5b00;
+  background: #fff8df;
 }
 
 .content-column {
@@ -1127,6 +1244,107 @@ input:focus-visible {
   padding-top: 18px;
   color: var(--muted);
   font-size: 0.8125rem;
+}
+
+.icon {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+  vertical-align: middle;
+}
+
+.text-button,
+.primary-button,
+.secondary-button,
+.segment-control__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.topbar {
+  position: relative;
+}
+
+.topbar-user {
+  color: var(--muted);
+  font-size: 0.875rem;
+  font-weight: 650;
+}
+
+.icon-button {
+  display: inline-grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid var(--blue-line);
+  border-radius: 7px;
+  color: var(--blue);
+  background: var(--white);
+}
+
+.icon-button:hover {
+  background: var(--blue-soft);
+}
+
+.button-icon {
+  font-size: 1.2rem;
+  line-height: 0.8;
+}
+
+.profile-popover {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 10px);
+  right: 24px;
+  width: min(390px, calc(100vw - 32px));
+  border: 1px solid var(--blue-line);
+  border-radius: 12px;
+  padding: 18px;
+  background: var(--white);
+  box-shadow: 0 16px 40px rgb(22 55 70 / 18%);
+}
+
+.profile-popover__heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+  color: var(--blue-deep);
+}
+
+.profile-popover__heading > .icon {
+  width: 28px;
+  height: 28px;
+}
+
+.profile-popover__heading div {
+  display: grid;
+  gap: 3px;
+}
+
+.profile-popover__heading span {
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+
+.profile-popover h3 {
+  margin: 0 0 14px;
+  color: var(--blue-deep);
+  font-size: 1rem;
+}
+
+.profile-popover form {
+  display: grid;
+  gap: 12px;
+}
+
+.form-message--success {
+  color: var(--success, #24744d);
 }
 
 @media (min-width: 760px) {

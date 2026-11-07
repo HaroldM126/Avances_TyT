@@ -2,6 +2,7 @@ from django.contrib.auth.models import Group, Permission, User
 from django.core.management import call_command
 from django.utils import timezone
 from django.test import TestCase
+from django.test import override_settings
 from rest_framework.test import APIClient
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -18,9 +19,73 @@ from .models import (
     Matricula,
     OpcionRespuesta,
     PeriodoAcademico,
+    PerfilUsuario,
     Pregunta,
     RespuestaIntento,
 )
+
+
+@override_settings(INITIAL_ADMIN_SETUP_TOKEN='setup-token-test')
+class InitialAdminSetupTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.payload = {
+            'username': 'initial-admin',
+            'email': 'initial-admin@example.com',
+            'first_name': 'Initial',
+            'last_name': 'Admin',
+            'password': 'StrongAdminPass123!',
+            'password_confirmation': 'StrongAdminPass123!',
+        }
+
+    def test_creates_only_initial_superuser_with_setup_token(self):
+        response = self.client.post(
+            '/api/auth/initial-admin/',
+            self.payload,
+            format='json',
+            HTTP_X_INITIAL_ADMIN_TOKEN='setup-token-test',
+        )
+        self.assertEqual(response.status_code, 201)
+        user = User.objects.get(username='initial-admin')
+        self.assertTrue(user.is_superuser)
+        self.assertTrue(user.is_staff)
+        self.assertTrue(user.check_password('StrongAdminPass123!'))
+
+        second_response = self.client.post(
+            '/api/auth/initial-admin/',
+            {
+                **self.payload,
+                'username': 'second-admin',
+                'email': 'second-admin@example.com',
+            },
+            format='json',
+            HTTP_X_INITIAL_ADMIN_TOKEN='setup-token-test',
+        )
+        self.assertEqual(second_response.status_code, 403)
+        self.assertEqual(User.objects.filter(is_superuser=True).count(), 1)
+
+    def test_rejects_missing_or_invalid_setup_token(self):
+        response = self.client.post(
+            '/api/auth/initial-admin/',
+            self.payload,
+            format='json',
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(User.objects.filter(is_superuser=True).exists())
+
+    def test_rejects_mismatched_or_weak_password(self):
+        response = self.client.post(
+            '/api/auth/initial-admin/',
+            {
+                **self.payload,
+                'password': '12345678',
+                'password_confirmation': 'different',
+            },
+            format='json',
+            HTTP_X_INITIAL_ADMIN_TOKEN='setup-token-test',
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('password_confirmation', response.data)
 
 
 class AuthenticationAndRolesTests(TestCase):
@@ -73,6 +138,36 @@ class AuthenticationAndRolesTests(TestCase):
             format='json',
         )
         self.assertEqual(response.status_code, 401)
+
+    def test_authenticated_user_can_change_only_password(self):
+        self.authenticate('student-api')
+        response = self.client.post(
+            '/api/auth/change-password/',
+            {
+                'current_password': 'StrongPass123',
+                'new_password': 'NewStrongPass456!',
+                'new_password_confirmation': 'NewStrongPass456!',
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.student.refresh_from_db()
+        self.assertTrue(
+            self.student.check_password('NewStrongPass456!'),
+        )
+
+    def test_change_password_rejects_wrong_current_password(self):
+        self.authenticate('student-api')
+        response = self.client.post(
+            '/api/auth/change-password/',
+            {
+                'current_password': 'WrongPass123',
+                'new_password': 'NewStrongPass456!',
+                'new_password_confirmation': 'NewStrongPass456!',
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, 400)
 
     def test_admin_can_create_user_and_student_cannot(self):
         self.authenticate('admin-api')
@@ -150,6 +245,90 @@ class AuthenticationAndRolesTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.data['activo'])
+
+    def test_admin_can_register_student_with_identity_and_course(self):
+        period = PeriodoAcademico.objects.create(
+            anio=2026,
+            nombre='2026-1',
+        )
+        course = CursoGrupo.objects.create(
+            nombre='Grupo Registro',
+            periodo=period,
+        )
+        self.authenticate('admin-api')
+        response = self.client.post(
+            '/api/users/estudiantes/',
+            {
+                'nombres': 'Ana María',
+                'apellidos': 'Pérez Gómez',
+                'numero_identidad': '1234567890',
+                'curso': course.id,
+                'password': 'StrongPass123',
+                'password_confirmation': 'StrongPass123',
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, 201)
+        student = User.objects.get(username='1234567890')
+        self.assertEqual(
+            list(student.groups.values_list('name', flat=True)),
+            ['Estudiante'],
+        )
+        self.assertEqual(student.perfil.numero_identidad, '1234567890')
+        self.assertEqual(
+            student.matriculas.get().curso_id,
+            course.id,
+        )
+
+    def test_admin_can_register_teacher_and_invalid_data_is_rejected(self):
+        self.authenticate('admin-api')
+        response = self.client.post(
+            '/api/users/docentes/',
+            {
+                'nombres': 'Docente 123',
+                'apellidos': 'Prueba',
+                'numero_identidad': '1234567891',
+                'password': 'StrongPass123',
+                'password_confirmation': 'StrongPass123',
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('nombres', response.data)
+
+        response = self.client.post(
+            '/api/users/docentes/',
+            {
+                'nombres': 'Carlos',
+                'apellidos': 'Docente',
+                'numero_identidad': '1234567891',
+                'password': 'StrongPass123',
+                'password_confirmation': 'StrongPass123',
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, 201)
+        teacher = User.objects.get(username='1234567891')
+        self.assertEqual(
+            list(teacher.groups.values_list('name', flat=True)),
+            ['Docente'],
+        )
+        self.assertEqual(PerfilUsuario.objects.count(), 1)
+
+    def test_students_and_teachers_require_user_management_permission(self):
+        self.authenticate('student-api')
+        response = self.client.post(
+            '/api/users/docentes/',
+            {
+                'nombres': 'Carlos',
+                'apellidos': 'Docente',
+                'numero_identidad': '1234567891',
+                'password': 'StrongPass123',
+                'password_confirmation': 'StrongPass123',
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, 403)
 
 
 class QuizAttemptAndRulesTests(TestCase):
@@ -243,6 +422,58 @@ class QuizAttemptAndRulesTests(TestCase):
         self.assertEqual(revision.status_code, 200)
         self.assertEqual(revision.data[0]['opcion_correcta'], self.correct.id)
 
+    def test_student_cannot_start_closed_quiz_or_exceed_attempt_limit(self):
+        period = PeriodoAcademico.objects.create(anio=2026, nombre='2026-1')
+        course = CursoGrupo.objects.create(nombre='Sexto A', periodo=period)
+        Matricula.objects.create(
+            estudiante=self.student,
+            curso=course,
+            identificacion='123456',
+        )
+        self.quiz.curso = course
+        self.quiz.save(update_fields=('curso',))
+        self.authenticate(self.student)
+        first = self.client.post(
+            f'/api/cuestionarios/{self.quiz.id}/iniciar/',
+            format='json',
+        )
+        self.assertEqual(first.status_code, 201)
+        second = self.client.post(
+            f'/api/cuestionarios/{self.quiz.id}/iniciar/',
+            format='json',
+        )
+        self.assertEqual(second.status_code, 400)
+        self.assertIn('agotado', second.data['detail'])
+
+        self.quiz.max_intentos = 2
+        self.quiz.fecha_cierre = timezone.now() - timedelta(minutes=1)
+        self.quiz.save(update_fields=('max_intentos', 'fecha_cierre'))
+        closed = self.client.post(
+            f'/api/cuestionarios/{self.quiz.id}/iniciar/',
+            format='json',
+        )
+        self.assertEqual(closed.status_code, 400)
+        self.assertIn('cerró', closed.data['detail'])
+
+    def test_student_can_mark_an_unanswered_question_for_review(self):
+        self.authenticate(self.student)
+        response = self.client.post(
+            f'/api/cuestionarios/{self.quiz.id}/iniciar/',
+            format='json',
+        )
+        attempt_id = response.data['intento_id']
+        response = self.client.patch(
+            f'/api/intentos/{attempt_id}/respuestas/',
+            {
+                'pregunta': self.question.id,
+                'marcada_revision': True,
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, 200)
+        detail = self.client.get(f'/api/intentos/{attempt_id}/')
+        self.assertTrue(detail.data['respuestas'][0]['marcada_revision'])
+
     def test_question_rejects_more_than_one_correct_option(self):
         self.authenticate(self.admin)
         response = self.client.post(
@@ -278,6 +509,24 @@ class QuizAttemptAndRulesTests(TestCase):
             format='json',
         )
         self.assertEqual(response.status_code, 400)
+
+    def test_quiz_rejects_maximum_grade_above_five(self):
+        serializer_data = {
+            'nombre': 'Escala inválida',
+            'fecha_apertura': timezone.now(),
+            'fecha_cierre': timezone.now() + timedelta(hours=1),
+            'nota_maxima': '5.01',
+            'nota_aprobar': '5.00',
+            'max_intentos': 1,
+        }
+        self.authenticate(self.admin)
+        response = self.client.post(
+            '/api/cuestionarios/',
+            serializer_data,
+            format='json',
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('nota_maxima', response.data)
 
 
 class ReportesTests(TestCase):
