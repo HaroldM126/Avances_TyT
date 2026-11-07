@@ -1,4 +1,5 @@
 from django.contrib.auth.models import Group, Permission, User
+from django.core.management import call_command
 from django.utils import timezone
 from django.test import TestCase
 from rest_framework.test import APIClient
@@ -549,6 +550,42 @@ class ReportesTests(TestCase):
         self.assertEqual(metrics['umbrales_aprobacion'], ['3.00'])
         self.assertEqual(response.data['count'], 3)
 
+    def test_completed_attempt_with_legacy_in_progress_state_is_labeled_sent(self):
+        self.in_progress.enviado = True
+        self.in_progress.fecha_envio = timezone.now()
+        self.in_progress.puntaje = Decimal('5.00')
+        self.in_progress.save(update_fields=(
+            'enviado',
+            'fecha_envio',
+            'puntaje',
+        ))
+
+        self.authenticate(self.admin)
+        response = self.client.get(
+            '/api/reportes/',
+            {'tipo': 'consolidado', 'curso': self.course.id},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['indicadores']['intentos_finalizados'], 3)
+        self.assertEqual(response.data['indicadores']['maxima'], Decimal('5.00'))
+        legacy_row = next(
+            row for row in response.data['results']
+            if row['id'] == self.in_progress.id
+        )
+        self.assertEqual(legacy_row['estado'], Intento.ESTADO_ENVIADO)
+        self.assertEqual(legacy_row['calificacion'], Decimal('5.00'))
+
+        history = self.client.get(
+            f'/api/reportes/historial/{self.student.id}/',
+        )
+        self.assertEqual(history.status_code, 200)
+        legacy_history = next(
+            row for row in history.data
+            if row['id'] == self.in_progress.id
+        )
+        self.assertEqual(legacy_history['estado'], Intento.ESTADO_ENVIADO)
+        self.assertEqual(legacy_history['puntaje'], Decimal('5.00'))
+
     def test_search_and_sorting(self):
         self.authenticate(self.admin)
         response = self.client.get(
@@ -655,6 +692,16 @@ class ReportesTests(TestCase):
         sheet = workbook['Consolidado general']
         self.assertEqual(sheet.max_row, len(all_results) + 7)
         self.assertEqual(len(all_results), query.data['count'])
+        self.assertRegex(
+            sheet['A2'].value,
+            r'^Fecha de generación: \d{2}/\d{2}/\d{4} \d{2}:\d{2}$',
+        )
+        self.assertEqual(
+            sheet['A5'].value,
+            'Las métricas excluyen los intentos no finalizados o sin nota; '
+            'esos intentos se listan con calificación —.',
+        )
+        self.assertEqual(sheet.column_dimensions['A'].width, 8)
         for offset, result in enumerate(all_results, start=8):
             self.assertEqual(sheet.cell(offset, 1).value, result['anio'])
             self.assertEqual(sheet.cell(offset, 2).value, result['periodo'])
@@ -670,18 +717,22 @@ class ReportesTests(TestCase):
                 result_date = datetime.fromisoformat(result_date)
             if timezone.is_aware(result_date):
                 result_date = timezone.localtime(result_date).replace(tzinfo=None)
-            result_date = result_date.replace(
-                microsecond=(result_date.microsecond // 1000) * 1000,
+            self.assertLessEqual(
+                abs(sheet.cell(offset, 7).value - result_date),
+                timedelta(milliseconds=1),
             )
-            self.assertEqual(sheet.cell(offset, 7).value, result_date)
             if result['calificacion'] is not None:
                 self.assertEqual(
                     sheet.cell(offset, 8).value,
                     float(result['calificacion']),
                 )
+                self.assertEqual(sheet.cell(offset, 8).number_format, '0.00')
             else:
-                self.assertIsNone(sheet.cell(offset, 8).value)
-            self.assertEqual(sheet.cell(offset, 9).value, result['estado'])
+                self.assertEqual(sheet.cell(offset, 8).value, '—')
+            self.assertEqual(
+                sheet.cell(offset, 9).value,
+                dict(Intento.ESTADO_CHOICES)[result['estado']],
+            )
             self.assertEqual(
                 sheet.cell(offset, 10).value,
                 float(result['nota_aprobar']),
@@ -756,4 +807,118 @@ class ReportesTests(TestCase):
         self.assertEqual(
             workbook['Desempeño por eje'].cell(7, 4).value,
             'Eje',
+        )
+
+    def test_history_excel_formats_grades_and_marks_unsubmitted_attempts(self):
+        self.authenticate(self.admin)
+        response = self.client.get(
+            f'/api/reportes/exportar/historial/?estudiante={self.student.id}',
+        )
+        self.assertEqual(response.status_code, 200)
+        workbook = load_workbook(
+            BytesIO(b''.join(response.streaming_content)),
+            data_only=False,
+        )
+        sheet = workbook['Historial individual']
+        self.assertEqual(sheet.cell(8, 9).value, 4)
+        self.assertEqual(sheet.cell(8, 9).number_format, '0.00')
+        self.assertEqual(sheet.cell(9, 9).value, '—')
+        self.assertEqual(sheet.cell(7, 10).value, 'Estado')
+        self.assertEqual(sheet.cell(8, 10).value, 'Enviado')
+        self.assertEqual(sheet.cell(9, 10).value, 'En curso')
+        self.assertRegex(
+            sheet['A2'].value,
+            r'^Fecha de generación: \d{2}/\d{2}/\d{4} \d{2}:\d{2}$',
+        )
+        self.assertEqual(
+            sheet['A5'].value,
+            'Las métricas excluyen los intentos no finalizados o sin nota; '
+            'esos intentos se listan con calificación —.',
+        )
+
+
+class SeedReportesTests(TestCase):
+    def test_seed_adds_paginated_results_idempotently_without_rewriting_history(self):
+        call_command('seed_reportes', verbosity=0)
+
+        demo_attempt = Intento.objects.get(
+            usuario__username='demo_estudiante_1',
+            cuestionario__nombre='[DEMO] Simulacro Grupo TyT A',
+            estado=Intento.ESTADO_ENVIADO,
+        )
+        original_answer = RespuestaIntento.objects.get(
+            intento=demo_attempt,
+            pregunta__enunciado='[DEMO TyT] Pregunta de lectura crítica',
+        )
+        demo_attempt.puntaje = Decimal('2.22')
+        demo_attempt.save(update_fields=('puntaje',))
+        original_answer.opcion = original_answer.pregunta.opciones.get(
+            es_correcta=False,
+        )
+        original_answer.save(update_fields=('opcion',))
+
+        pagination_attempts = Intento.objects.filter(
+            cuestionario__nombre__startswith='[DEMO PAGINACIÓN]',
+        )
+        self.assertEqual(pagination_attempts.count(), 18)
+        total_attempts = Intento.objects.count()
+
+        call_command('seed_reportes', verbosity=0)
+
+        self.assertEqual(Intento.objects.count(), total_attempts)
+        self.assertEqual(
+            Intento.objects.filter(
+                cuestionario__nombre__startswith='[DEMO PAGINACIÓN]',
+            ).count(),
+            18,
+        )
+        demo_attempt.refresh_from_db()
+        original_answer.refresh_from_db()
+        self.assertEqual(demo_attempt.puntaje, Decimal('2.22'))
+        self.assertEqual(
+            original_answer.opcion.es_correcta,
+            False,
+        )
+
+        pagination_attempts = Intento.objects.filter(
+            cuestionario__nombre__startswith='[DEMO PAGINACIÓN]',
+            enviado=True,
+            fecha_envio__isnull=False,
+            puntaje__isnull=False,
+        )
+        self.assertEqual(pagination_attempts.count(), 18)
+        self.assertEqual(
+            pagination_attempts.values('usuario_id').distinct().count(),
+            6,
+        )
+        self.assertEqual(
+            set(pagination_attempts.values_list('periodo__nombre', flat=True)),
+            {'2026-1', '2026-2'},
+        )
+        grades = list(
+            pagination_attempts.values_list('puntaje', flat=True).distinct()
+        )
+        self.assertGreaterEqual(min(grades), Decimal('1.50'))
+        self.assertLessEqual(max(grades), Decimal('5.00'))
+        self.assertGreater(len(grades), 3)
+        self.assertTrue(any(grade < Decimal('3.00') for grade in grades))
+        self.assertTrue(any(grade >= Decimal('3.00') for grade in grades))
+        self.assertEqual(
+            RespuestaIntento.objects.filter(
+                intento__in=pagination_attempts,
+                pregunta__enunciado__startswith='[DEMO PAGINACIÓN]',
+                opcion__isnull=False,
+            ).count(),
+            18 * 3,
+        )
+        self.assertEqual(
+            Pregunta.objects.filter(
+                enunciado__startswith='[DEMO PAGINACIÓN]',
+                competencia__nombre__in=(
+                    'Lectura crítica',
+                    'Comprensión ciudadana',
+                    'Pensamiento crítico',
+                ),
+            ).count(),
+            3,
         )

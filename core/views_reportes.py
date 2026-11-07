@@ -15,10 +15,13 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.pagination import PageNumberPagination
 
+from .models import Intento
 from .permissions import has_active_permission
 from .permissions import PuedeConfigurarCuestionarios
 from .services.reportes import (
     aplicar_filtros,
+    estado_intento_reporte,
+    intento_finalizado,
     intentos_reporte,
     obtener_estadisticas_dificultad,
     obtener_estadisticas_eje,
@@ -134,8 +137,19 @@ class ConsultaReporteView(APIView):
         elif tipo == 'historial':
             for row in page:
                 row['fecha'] = row['fecha_envio'] or row['fecha_inicio']
-                if row['fecha_envio'] is None:
+                row['estado'] = estado_intento_reporte(
+                    row['estado'],
+                    row['enviado'],
+                    row['fecha_envio'],
+                    row['puntaje'],
+                )
+                if not intento_finalizado(
+                    row['enviado'],
+                    row['fecha_envio'],
+                    row['puntaje'],
+                ):
                     row['puntaje'] = None
+                row.pop('enviado')
         return Response({
             'count': paginator.page.paginator.count,
             'next': paginator.get_next_link(),
@@ -163,8 +177,19 @@ class HistorialEstudianteView(APIView):
         rows = list(obtener_reporte('historial', queryset, params, request.user))
         for row in rows:
             row['fecha'] = row['fecha_envio'] or row['fecha_inicio']
-            if row['fecha_envio'] is None:
+            row['estado'] = estado_intento_reporte(
+                row['estado'],
+                row['enviado'],
+                row['fecha_envio'],
+                row['puntaje'],
+            )
+            if not intento_finalizado(
+                row['enviado'],
+                row['fecha_envio'],
+                row['puntaje'],
+            ):
                 row['puntaje'] = None
+            row.pop('enviado')
         return Response(rows)
 
 
@@ -198,13 +223,20 @@ def _threshold_description(queryset):
     )
 
 
+def _estado_legible(estado):
+    return dict(Intento.ESTADO_CHOICES).get(estado, estado)
+
+
 def _write_sheet(workbook, title, headers, rows, generated, filters, threshold):
     sheet = workbook.create_sheet(title=title)
     sheet.append([title])
-    sheet.append([f'Fecha de generación: {generated.isoformat()}'])
+    sheet.append([f'Fecha de generación: {generated}'])
     sheet.append([f'Filtros activos: {filters}'])
     sheet.append([f'Umbral de aprobación: {threshold}'])
-    sheet.append(['Los intentos no finalizados o sin nota se excluyen.'])
+    sheet.append([
+        'Las métricas excluyen los intentos no finalizados o sin nota; '
+        'esos intentos se listan con calificación —.'
+    ])
     sheet.append([])
     sheet.append(headers)
 
@@ -228,11 +260,16 @@ def _write_sheet(workbook, title, headers, rows, generated, filters, threshold):
 
     sheet.freeze_panes = 'A8'
     sheet.auto_filter.ref = f'A7:{_column_letter(len(headers))}{max(sheet.max_row, 7)}'
-    for column in sheet.columns:
+    for column in sheet.iter_cols(
+        min_row=7,
+        max_row=7 + len(rows),
+        min_col=1,
+        max_col=len(headers),
+    ):
         width = min(
             48,
             max(
-                12,
+                8,
                 max(
                     len(str(cell.value or ''))
                     for cell in column
@@ -282,8 +319,8 @@ def _consolidated_excel_rows(queryset, user, params):
         values.extend([
             row['simulacro'],
             row['fecha'],
-            row['calificacion'],
-            row['estado'],
+            row['calificacion'] if row['calificacion'] is not None else '—',
+            _estado_legible(row['estado']),
             row['nota_aprobar'],
         ])
         table.append(values)
@@ -375,7 +412,12 @@ class ExportarReporteView(APIView):
             rows = []
             for item in history:
                 result_date = item['fecha_envio'] or item['fecha_inicio']
-                grade = item['puntaje'] if item['fecha_envio'] else None
+                completed = intento_finalizado(
+                    item['enviado'],
+                    item['fecha_envio'],
+                    item['puntaje'],
+                )
+                grade = item['puntaje'] if completed else '—'
                 student = (
                     f"{item['usuario__first_name']} {item['usuario__last_name']}".strip()
                     or item['usuario__username']
@@ -391,13 +433,23 @@ class ExportarReporteView(APIView):
                     item['aciertos'],
                     answered - item['aciertos'],
                     grade,
+                    _estado_legible(estado_intento_reporte(
+                        item['estado'],
+                        item['enviado'],
+                        item['fecha_envio'],
+                        item['puntaje'],
+                    )),
                 ])
             headers = [
                 'Estudiante', 'Curso', 'Período', 'Simulacro', 'Fecha',
                 'Preguntas respondidas', 'Aciertos', 'Errores', 'Nota final',
+                'Estado',
             ]
 
-        generated = timezone.localtime()
+        generated = timezone.localtime().replace(
+            second=0,
+            microsecond=0,
+        ).strftime('%d/%m/%Y %H:%M')
         threshold = _threshold_description(queryset)
         workbook = Workbook()
         default_sheet = workbook.active

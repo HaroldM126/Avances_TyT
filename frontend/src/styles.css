@@ -1306,7 +1306,7 @@ input:focus-visible {
 
 .report-indicators {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(135px, 100%), 1fr));
   gap: 12px;
   margin: 22px 0 30px;
 }
@@ -1315,6 +1315,7 @@ input:focus-visible {
   display: grid;
   align-content: space-between;
   gap: 10px;
+  min-width: 0;
   min-height: 92px;
   border: 1px solid var(--blue-line);
   border-radius: 8px;
@@ -1328,9 +1329,12 @@ input:focus-visible {
 }
 
 .report-indicator strong {
+  min-width: 0;
+  max-width: 100%;
   color: var(--blue-deep);
-  font-size: 1.3rem;
+  font-size: clamp(1.05rem, 2.4vw, 1.3rem);
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
 .report-indicator--wide {

@@ -104,8 +104,12 @@ El comando `seed_reportes` crea de forma idempotente:
 - Seis estudiantes, con matrículas e identificaciones ficticias.
 - Dos cuestionarios que cubren Lectura crítica, Comprensión ciudadana y
   Pensamiento crítico.
-- Seis intentos finalizados y dos en curso; las respuestas incluyen aciertos,
-  errores y respuestas sin contestar.
+- Seis intentos base y 18 intentos finalizados adicionales para paginación,
+  repartidos entre `2026-1` y `2026-2` y los seis estudiantes demo; también
+  crea dos intentos en curso.
+- Las notas de los intentos adicionales varían entre 1.50 y 5.00; incluyen
+  aprobados y no aprobados, y registran respuestas en los tres ejes temáticos.
+- Los intentos y respuestas existentes no se reescriben al repetir el comando.
 
 Los usuarios de ejemplo son `demo_estudiante_1` a `demo_estudiante_6`, con
 contraseña `TyT-Demo-2026!`. Son datos locales de demostración.
@@ -147,13 +151,15 @@ contraseña `TyT-Demo-2026!`. Son datos locales de demostración.
 ## Validación ejecutada
 
 - `python manage.py check`: sin problemas.
-- `DJANGO_USE_SQLITE=1 python manage.py test core`: 21 pruebas aprobadas.
+- `DJANGO_USE_SQLITE=1 python manage.py test core`: 24 pruebas aprobadas.
 - `python manage.py makemigrations --check --dry-run`: no detecta cambios de
   modelos pendientes. Django mostró una advertencia al intentar consultar el
   MySQL local, que no acepta la conexión predeterminada; la migración se aplicó
   de todas formas en una base SQLite temporal aislada.
 - `npm run build` desde `frontend/`: compilación de producción aprobada.
-- La migración y `seed_reportes` se ejecutaron dos veces en SQLite temporal:
-  quedaron 2 años, 4 períodos, 2 cursos, 6 estudiantes, 6 matrículas, 3
-  preguntas, 6 intentos enviados y 2 en curso, sin duplicados al repetir el
-  comando.
+- `seed_reportes` se ejecutó dos veces en la SQLite local: conservó los 28
+  intentos y 80 respuestas que ya existían, y dejó exactamente los mismos 18
+  intentos de paginación en ambas ejecuciones. Sus notas fueron 1.50, 1.67,
+  3.17, 3.33, 3.50 y 5.00; están repartidos entre los dos períodos y seis
+  estudiantes. En una base nueva, junto con los datos base, el seed crea 24
+  intentos finalizados y 2 en curso.

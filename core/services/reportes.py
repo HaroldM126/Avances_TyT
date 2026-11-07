@@ -62,11 +62,31 @@ def intentos_finalizados(queryset=None):
     """Limita promedios e indicadores a intentos enviados con nota."""
     # Los intentos en curso o sin calificación se excluyen de las métricas.
     queryset = queryset if queryset is not None else intentos_reporte()
-    return queryset.filter(
+    return queryset.filter(criterio_finalizacion_intento())
+
+
+def criterio_finalizacion_intento():
+    """Criterio único de finalización para agregaciones y presentación."""
+    return Q(
         enviado=True,
         fecha_envio__isnull=False,
         puntaje__isnull=False,
     )
+
+
+def intento_finalizado(enviado, fecha_envio, puntaje):
+    """Aplica a una fila el mismo criterio usado por las consultas ORM."""
+    return enviado and fecha_envio is not None and puntaje is not None
+
+
+def estado_intento_reporte(estado, enviado, fecha_envio, puntaje):
+    """Evita mostrar como en curso un intento que cumple la finalización."""
+    if (
+        estado == Intento.ESTADO_EN_CURSO
+        and intento_finalizado(enviado, fecha_envio, puntaje)
+    ):
+        return Intento.ESTADO_ENVIADO
+    return estado
 
 
 def _id_param(params, name):
@@ -376,10 +396,19 @@ def _intento_rows(queryset, incluir_identificacion=False):
             'simulacro': intento.cuestionario.nombre,
             'fecha': intento.fecha_envio or intento.fecha_inicio,
             'calificacion': intento.puntaje,
-            'estado': intento.estado,
+            'estado': estado_intento_reporte(
+                intento.estado,
+                intento.enviado,
+                intento.fecha_envio,
+                intento.puntaje,
+            ),
             'nota_aprobar': intento.cuestionario.nota_aprobar,
         }
-        if not intento.enviado or intento.fecha_envio is None:
+        if not intento_finalizado(
+            intento.enviado,
+            intento.fecha_envio,
+            intento.puntaje,
+        ):
             row['calificacion'] = None
         if incluir_identificacion:
             row['identificacion'] = intento.identificacion_estudiante or ''
@@ -485,6 +514,7 @@ def obtener_reporte(tipo, queryset, params, user):
                 'cuestionario__nombre',
                 'fecha_inicio',
                 'fecha_envio',
+                'enviado',
                 'puntaje',
                 'estado',
                 'preguntas_respondidas',

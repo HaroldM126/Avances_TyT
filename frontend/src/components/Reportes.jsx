@@ -34,6 +34,15 @@ const ATTEMPT_STATUS_LABELS = {
   ANULADO: 'Anulado',
 }
 
+const GRADE_FIELDS = new Set([
+  'calificacion',
+  'puntaje',
+  'promedio',
+  'minima',
+  'maxima',
+  'nota_promedio',
+])
+
 const COLUMNS = {
   consolidado: [
     ['estudiante', 'Estudiante'],
@@ -105,6 +114,12 @@ function display(value) {
     if (!Number.isNaN(date.getTime())) return date.toLocaleString('es-CO')
   }
   return value
+}
+
+function formatGrade(value) {
+  if (value === null || value === undefined || value === '') return '—'
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric.toFixed(2) : display(value)
 }
 
 function buildParams(values, extra = {}) {
@@ -239,9 +254,9 @@ export default function Reportes({ canSeeIdentification, isStudent }) {
   const indicatorCards = [
     ['Estudiantes distintos', data?.indicadores?.estudiantes_distintos],
     ['Intentos finalizados', data?.indicadores?.intentos_finalizados],
-    ['Promedio', data?.indicadores?.promedio],
-    ['Nota mínima', data?.indicadores?.minima],
-    ['Nota máxima', data?.indicadores?.maxima],
+    ['Promedio', formatGrade(data?.indicadores?.promedio)],
+    ['Nota mínima', formatGrade(data?.indicadores?.minima)],
+    ['Nota máxima', formatGrade(data?.indicadores?.maxima)],
     ['Aprobación', data?.indicadores?.porcentaje_aprobacion == null
       ? null
       : `${data.indicadores.porcentaje_aprobacion}%`],
@@ -380,7 +395,14 @@ export default function Reportes({ canSeeIdentification, isStudent }) {
                   const studentName = row.estudiante || `${row['usuario__first_name'] || ''} ${row['usuario__last_name'] || ''}`.trim() || row['usuario__username']
                   return (
                     <tr key={row.id || `${type}-${index}`}>
-                      {columns.map(([key]) => <td key={key}>{display(key === 'estudiante' ? studentName : row[key])}</td>)}
+                      {columns.map(([key]) => {
+                        const value = key === 'estudiante' ? studentName : row[key]
+                        return (
+                          <td key={key}>
+                            {GRADE_FIELDS.has(key) ? formatGrade(value) : display(value)}
+                          </td>
+                        )
+                      })}
                       {['consolidado', 'calificaciones'].includes(type) && (
                         <td>
                           {studentId
@@ -421,7 +443,7 @@ export default function Reportes({ canSeeIdentification, isStudent }) {
                   <td>{row['cuestionario__nombre']}</td>
                   <td>{row.preguntas_respondidas}</td>
                   <td>{row.aciertos}</td>
-                  <td>{display(row.puntaje)}</td>
+                  <td>{formatGrade(row.puntaje)}</td>
                   <td>{row.estado}</td>
                 </tr>)}</tbody>
               </table></div>}
