@@ -1,11 +1,22 @@
+from django.db import transaction
+from django.core.exceptions import ValidationError
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from .models import Cuestionario, CuestionarioPregunta, Intento, Pregunta, RespuestaIntento
+from .models import (
+    Cuestionario,
+    CuestionarioPregunta,
+    Intento,
+    Matricula,
+    Pregunta,
+    RespuestaIntento,
+)
 from .permissions import PuedeConfigurarCuestionarios
+from .permissions import PuedeConsultarCuestionarios
 from .serializers_cuestionarios import (
     CuestionarioEstudianteSerializer,
     CuestionarioListSerializer,
@@ -20,6 +31,8 @@ class CuestionarioViewSet(viewsets.ModelViewSet):
     def get_permissions(self):
         if self.action in ('disponibles', 'iniciar'):
             return [IsAuthenticated()]
+        if self.action in ('list', 'retrieve'):
+            return [IsAuthenticated(), PuedeConsultarCuestionarios()]
         return [IsAuthenticated(), PuedeConfigurarCuestionarios()]
 
     def get_serializer_class(self):
@@ -31,6 +44,8 @@ class CuestionarioViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        if not (self.request.user.is_superuser or self.request.user.is_staff):
+            qs = qs.filter(creador=self.request.user)
         params = self.request.query_params
         activo = params.get('activo')
         if activo is not None:
@@ -49,6 +64,12 @@ class CuestionarioViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='activar')
     def activar(self, request, pk=None):
         cuestionario = self.get_object()
+        if not cuestionario.fecha_apertura or not cuestionario.fecha_cierre:
+            return Response({'detail': 'Configura las fechas de apertura y cierre antes de publicar.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            cuestionario.full_clean()
+        except ValidationError as error:
+            return Response({'detail': 'Hay datos inválidos en el cuestionario.', 'errores': getattr(error, 'message_dict', {})}, status=status.HTTP_400_BAD_REQUEST)
         errores = cuestionario.validar_preguntas()
         if errores:
             return Response(
@@ -56,7 +77,8 @@ class CuestionarioViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         cuestionario.activo = True
-        cuestionario.save(update_fields=['activo'])
+        cuestionario.estado = Cuestionario.ESTADO_PUBLICADO
+        cuestionario.save(update_fields=['activo', 'estado'])
         return Response(CuestionarioSerializer(cuestionario).data)
 
     @action(detail=True, methods=['post'], url_path='desactivar')
@@ -68,23 +90,45 @@ class CuestionarioViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='disponibles')
     def disponibles(self, request):
-        qs = Cuestionario.objects.disponibles()
-        serializer = CuestionarioEstudianteSerializer(qs, many=True)
+        if not request.user.groups.filter(name='Estudiante', rol__activo=True).exists():
+            return Response({'detail': 'Este listado está disponible para cuentas de estudiante.'}, status=status.HTTP_403_FORBIDDEN)
+        ahora = timezone.now()
+        qs = Cuestionario.objects.filter(
+            activo=True,
+            estado=Cuestionario.ESTADO_PUBLICADO,
+            fecha_apertura__lte=ahora,
+            fecha_cierre__gte=ahora,
+        ).select_related('curso__periodo')
+        if request.user.groups.filter(name='Estudiante').exists():
+            cursos = Matricula.objects.filter(
+                estudiante=request.user,
+                activa=True,
+            ).values('curso_id')
+            qs = qs.filter(Q(curso__isnull=True) | Q(curso_id__in=cursos))
+        serializer = CuestionarioEstudianteSerializer(
+            qs,
+            many=True,
+            context={'request': request},
+        )
         return Response(serializer.data)
 
     @action(detail=True, methods=['post'], url_path='iniciar')
     def iniciar(self, request, pk=None):
-        cuestionario = self.get_object()
-        puede, motivo = cuestionario.puede_iniciar(request.user)
-        if not puede:
-            return Response(
-                {'detail': motivo},
-                status=status.HTTP_400_BAD_REQUEST,
+        if not request.user.groups.filter(name='Estudiante', rol__activo=True).exists():
+            return Response({'detail': 'Solo una cuenta de estudiante puede iniciar una evaluación.'}, status=status.HTTP_403_FORBIDDEN)
+        with transaction.atomic():
+            cuestionario = Cuestionario.objects.select_for_update().get(pk=pk)
+            puede, motivo = cuestionario.puede_iniciar(request.user)
+            if not puede:
+                return Response({'detail': motivo}, status=status.HTTP_400_BAD_REQUEST)
+            if not cuestionario.validar_contrasena(request.data.get('contrasena')):
+                return Response({'detail': 'La contraseña de acceso no es correcta.'}, status=status.HTTP_403_FORBIDDEN)
+            intento = Intento.objects.create(
+                usuario=request.user,
+                cuestionario=cuestionario,
+                curso=cuestionario.curso,
+                periodo=cuestionario.curso.periodo if cuestionario.curso_id else None,
             )
-        intento = Intento.objects.create(
-            usuario=request.user,
-            cuestionario=cuestionario,
-        )
         RespuestaIntento.objects.bulk_create([
             RespuestaIntento(
                 intento=intento,

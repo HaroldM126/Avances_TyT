@@ -1,19 +1,91 @@
 from django.contrib.auth.models import Group, Permission, User
+from django.core.management import call_command
 from django.utils import timezone
 from django.test import TestCase
+from django.test import override_settings
 from rest_framework.test import APIClient
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
+from io import BytesIO
+from openpyxl import load_workbook
 
 from .models import (
     Categoria,
     Competencia,
     Cuestionario,
     CuestionarioPregunta,
+    CursoGrupo,
+    Intento,
+    Matricula,
     OpcionRespuesta,
+    PeriodoAcademico,
+    PerfilUsuario,
     Pregunta,
     RespuestaIntento,
 )
+
+
+@override_settings(INITIAL_ADMIN_SETUP_TOKEN='setup-token-test')
+class InitialAdminSetupTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.payload = {
+            'username': 'initial-admin',
+            'email': 'initial-admin@example.com',
+            'first_name': 'Initial',
+            'last_name': 'Admin',
+            'password': 'StrongAdminPass123!',
+            'password_confirmation': 'StrongAdminPass123!',
+        }
+
+    def test_creates_only_initial_superuser_with_setup_token(self):
+        response = self.client.post(
+            '/api/auth/initial-admin/',
+            self.payload,
+            format='json',
+            HTTP_X_INITIAL_ADMIN_TOKEN='setup-token-test',
+        )
+        self.assertEqual(response.status_code, 201)
+        user = User.objects.get(username='initial-admin')
+        self.assertTrue(user.is_superuser)
+        self.assertTrue(user.is_staff)
+        self.assertTrue(user.check_password('StrongAdminPass123!'))
+
+        second_response = self.client.post(
+            '/api/auth/initial-admin/',
+            {
+                **self.payload,
+                'username': 'second-admin',
+                'email': 'second-admin@example.com',
+            },
+            format='json',
+            HTTP_X_INITIAL_ADMIN_TOKEN='setup-token-test',
+        )
+        self.assertEqual(second_response.status_code, 403)
+        self.assertEqual(User.objects.filter(is_superuser=True).count(), 1)
+
+    def test_rejects_missing_or_invalid_setup_token(self):
+        response = self.client.post(
+            '/api/auth/initial-admin/',
+            self.payload,
+            format='json',
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(User.objects.filter(is_superuser=True).exists())
+
+    def test_rejects_mismatched_or_weak_password(self):
+        response = self.client.post(
+            '/api/auth/initial-admin/',
+            {
+                **self.payload,
+                'password': '12345678',
+                'password_confirmation': 'different',
+            },
+            format='json',
+            HTTP_X_INITIAL_ADMIN_TOKEN='setup-token-test',
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('password_confirmation', response.data)
 
 
 class AuthenticationAndRolesTests(TestCase):
@@ -66,6 +138,36 @@ class AuthenticationAndRolesTests(TestCase):
             format='json',
         )
         self.assertEqual(response.status_code, 401)
+
+    def test_authenticated_user_can_change_only_password(self):
+        self.authenticate('student-api')
+        response = self.client.post(
+            '/api/auth/change-password/',
+            {
+                'current_password': 'StrongPass123',
+                'new_password': 'NewStrongPass456!',
+                'new_password_confirmation': 'NewStrongPass456!',
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.student.refresh_from_db()
+        self.assertTrue(
+            self.student.check_password('NewStrongPass456!'),
+        )
+
+    def test_change_password_rejects_wrong_current_password(self):
+        self.authenticate('student-api')
+        response = self.client.post(
+            '/api/auth/change-password/',
+            {
+                'current_password': 'WrongPass123',
+                'new_password': 'NewStrongPass456!',
+                'new_password_confirmation': 'NewStrongPass456!',
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, 400)
 
     def test_admin_can_create_user_and_student_cannot(self):
         self.authenticate('admin-api')
@@ -143,6 +245,90 @@ class AuthenticationAndRolesTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.data['activo'])
+
+    def test_admin_can_register_student_with_identity_and_course(self):
+        period = PeriodoAcademico.objects.create(
+            anio=2026,
+            nombre='2026-1',
+        )
+        course = CursoGrupo.objects.create(
+            nombre='Grupo Registro',
+            periodo=period,
+        )
+        self.authenticate('admin-api')
+        response = self.client.post(
+            '/api/users/estudiantes/',
+            {
+                'nombres': 'Ana María',
+                'apellidos': 'Pérez Gómez',
+                'numero_identidad': '1234567890',
+                'curso': course.id,
+                'password': 'StrongPass123',
+                'password_confirmation': 'StrongPass123',
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, 201)
+        student = User.objects.get(username='1234567890')
+        self.assertEqual(
+            list(student.groups.values_list('name', flat=True)),
+            ['Estudiante'],
+        )
+        self.assertEqual(student.perfil.numero_identidad, '1234567890')
+        self.assertEqual(
+            student.matriculas.get().curso_id,
+            course.id,
+        )
+
+    def test_admin_can_register_teacher_and_invalid_data_is_rejected(self):
+        self.authenticate('admin-api')
+        response = self.client.post(
+            '/api/users/docentes/',
+            {
+                'nombres': 'Docente 123',
+                'apellidos': 'Prueba',
+                'numero_identidad': '1234567891',
+                'password': 'StrongPass123',
+                'password_confirmation': 'StrongPass123',
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('nombres', response.data)
+
+        response = self.client.post(
+            '/api/users/docentes/',
+            {
+                'nombres': 'Carlos',
+                'apellidos': 'Docente',
+                'numero_identidad': '1234567891',
+                'password': 'StrongPass123',
+                'password_confirmation': 'StrongPass123',
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, 201)
+        teacher = User.objects.get(username='1234567891')
+        self.assertEqual(
+            list(teacher.groups.values_list('name', flat=True)),
+            ['Docente'],
+        )
+        self.assertEqual(PerfilUsuario.objects.count(), 1)
+
+    def test_students_and_teachers_require_user_management_permission(self):
+        self.authenticate('student-api')
+        response = self.client.post(
+            '/api/users/docentes/',
+            {
+                'nombres': 'Carlos',
+                'apellidos': 'Docente',
+                'numero_identidad': '1234567891',
+                'password': 'StrongPass123',
+                'password_confirmation': 'StrongPass123',
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, 403)
 
 
 class QuizAttemptAndRulesTests(TestCase):
@@ -236,6 +422,58 @@ class QuizAttemptAndRulesTests(TestCase):
         self.assertEqual(revision.status_code, 200)
         self.assertEqual(revision.data[0]['opcion_correcta'], self.correct.id)
 
+    def test_student_cannot_start_closed_quiz_or_exceed_attempt_limit(self):
+        period = PeriodoAcademico.objects.create(anio=2026, nombre='2026-1')
+        course = CursoGrupo.objects.create(nombre='Sexto A', periodo=period)
+        Matricula.objects.create(
+            estudiante=self.student,
+            curso=course,
+            identificacion='123456',
+        )
+        self.quiz.curso = course
+        self.quiz.save(update_fields=('curso',))
+        self.authenticate(self.student)
+        first = self.client.post(
+            f'/api/cuestionarios/{self.quiz.id}/iniciar/',
+            format='json',
+        )
+        self.assertEqual(first.status_code, 201)
+        second = self.client.post(
+            f'/api/cuestionarios/{self.quiz.id}/iniciar/',
+            format='json',
+        )
+        self.assertEqual(second.status_code, 400)
+        self.assertIn('agotado', second.data['detail'])
+
+        self.quiz.max_intentos = 2
+        self.quiz.fecha_cierre = timezone.now() - timedelta(minutes=1)
+        self.quiz.save(update_fields=('max_intentos', 'fecha_cierre'))
+        closed = self.client.post(
+            f'/api/cuestionarios/{self.quiz.id}/iniciar/',
+            format='json',
+        )
+        self.assertEqual(closed.status_code, 400)
+        self.assertIn('cerró', closed.data['detail'])
+
+    def test_student_can_mark_an_unanswered_question_for_review(self):
+        self.authenticate(self.student)
+        response = self.client.post(
+            f'/api/cuestionarios/{self.quiz.id}/iniciar/',
+            format='json',
+        )
+        attempt_id = response.data['intento_id']
+        response = self.client.patch(
+            f'/api/intentos/{attempt_id}/respuestas/',
+            {
+                'pregunta': self.question.id,
+                'marcada_revision': True,
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, 200)
+        detail = self.client.get(f'/api/intentos/{attempt_id}/')
+        self.assertTrue(detail.data['respuestas'][0]['marcada_revision'])
+
     def test_question_rejects_more_than_one_correct_option(self):
         self.authenticate(self.admin)
         response = self.client.post(
@@ -271,3 +509,665 @@ class QuizAttemptAndRulesTests(TestCase):
             format='json',
         )
         self.assertEqual(response.status_code, 400)
+
+    def test_quiz_rejects_maximum_grade_above_five(self):
+        serializer_data = {
+            'nombre': 'Escala inválida',
+            'fecha_apertura': timezone.now(),
+            'fecha_cierre': timezone.now() + timedelta(hours=1),
+            'nota_maxima': '5.01',
+            'nota_aprobar': '5.00',
+            'max_intentos': 1,
+        }
+        self.authenticate(self.admin)
+        response = self.client.post(
+            '/api/cuestionarios/',
+            serializer_data,
+            format='json',
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('nota_maxima', response.data)
+
+
+class ReportesTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.admin = User.objects.create_user(
+            username='report-admin',
+            password='StrongPass123',
+        )
+        self.student = User.objects.create_user(
+            username='report-student',
+            password='StrongPass123',
+            first_name='Ana',
+            last_name='Pérez',
+        )
+        self.other_student = User.objects.create_user(
+            username='report-other',
+            password='StrongPass123',
+            first_name='Luis',
+            last_name='Díaz',
+        )
+        self.no_permission = User.objects.create_user(
+            username='report-no-permission',
+            password='StrongPass123',
+        )
+        admin_group = Group.objects.get(name='Administrador')
+        student_group = Group.objects.get(name='Estudiante')
+        admin_group.permissions.add(
+            Permission.objects.get(codename='ver_identificacion_estudiante'),
+        )
+        self.admin.groups.add(admin_group)
+        self.student.groups.add(student_group)
+        self.other_student.groups.add(student_group)
+        self.period = PeriodoAcademico.objects.create(
+            anio=2026,
+            nombre='2026-1',
+        )
+        self.other_period = PeriodoAcademico.objects.create(
+            anio=2025,
+            nombre='2025-2',
+        )
+        self.course = CursoGrupo.objects.create(
+            nombre='Grupo A',
+            periodo=self.period,
+        )
+        self.other_course = CursoGrupo.objects.create(
+            nombre='Grupo B',
+            periodo=self.other_period,
+        )
+        Matricula.objects.create(
+            estudiante=self.student,
+            curso=self.course,
+            identificacion='ID-001',
+        )
+        Matricula.objects.create(
+            estudiante=self.other_student,
+            curso=self.course,
+            identificacion='ID-002',
+        )
+        self.category = Categoria.objects.create(nombre='Reporte categoría')
+        self.axis = Competencia.objects.create(nombre='Lectura crítica')
+        self.quiz = Cuestionario.objects.create(
+            nombre='Reporte simulacro',
+            curso=self.course,
+            nota_maxima=Decimal('5.00'),
+            nota_aprobar=Decimal('3.00'),
+        )
+        self.other_quiz = Cuestionario.objects.create(
+            nombre='Otro curso',
+            curso=self.other_course,
+            nota_maxima=Decimal('5.00'),
+            nota_aprobar=Decimal('3.00'),
+        )
+        self.question = self.create_question(
+            'Pregunta reporte',
+            self.axis,
+        )
+        self.other_question = self.create_question(
+            'Pregunta otro curso',
+            self.axis,
+        )
+        for quiz, question in (
+            (self.quiz, self.question),
+            (self.other_quiz, self.other_question),
+        ):
+            CuestionarioPregunta.objects.create(
+                cuestionario=quiz,
+                pregunta=question,
+            )
+        self.correct = self.question.opciones.get(es_correcta=True)
+        self.incorrect = self.question.opciones.get(es_correcta=False)
+        self.completed_one = self.create_attempt(
+            self.student,
+            self.quiz,
+            Decimal('4.00'),
+            self.correct,
+        )
+        self.completed_two = self.create_attempt(
+            self.other_student,
+            self.quiz,
+            Decimal('2.00'),
+            self.incorrect,
+        )
+        self.create_attempt(
+            self.other_student,
+            self.other_quiz,
+            Decimal('5.00'),
+            self.other_question.opciones.get(es_correcta=True),
+        )
+        self.in_progress = Intento.objects.create(
+            usuario=self.student,
+            cuestionario=self.quiz,
+            curso=self.course,
+            periodo=self.period,
+        )
+        RespuestaIntento.objects.create(
+            intento=self.in_progress,
+            pregunta=self.question,
+            opcion=self.correct,
+        )
+
+    def create_question(self, text, axis):
+        question = Pregunta.objects.create(
+            categoria=self.category,
+            competencia=axis,
+            enunciado=text,
+        )
+        OpcionRespuesta.objects.create(
+            pregunta=question,
+            texto=f'{text} correcta',
+            es_correcta=True,
+        )
+        OpcionRespuesta.objects.create(
+            pregunta=question,
+            texto=f'{text} incorrecta',
+            es_correcta=False,
+        )
+        return question
+
+    def create_attempt(self, user, quiz, grade, option):
+        attempt = Intento.objects.create(
+            usuario=user,
+            cuestionario=quiz,
+            curso=quiz.curso,
+            periodo=quiz.curso.periodo,
+            puntaje=grade,
+            enviado=True,
+            estado=Intento.ESTADO_ENVIADO,
+            fecha_envio=timezone.now(),
+        )
+        RespuestaIntento.objects.create(
+            intento=attempt,
+            pregunta=quiz.cuestionario_preguntas.first().pregunta,
+            opcion=option,
+        )
+        return attempt
+
+    def authenticate(self, user):
+        response = self.client.post(
+            '/api/auth/token/',
+            {'username': user.username, 'password': 'StrongPass123'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.client.credentials(
+            HTTP_AUTHORIZATION=f"Bearer {response.data['access']}",
+        )
+
+    def test_cascading_filters_only_return_compatible_values(self):
+        self.authenticate(self.admin)
+        response = self.client.get('/api/reportes/filtros/?anio=2026')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['periodos'], [{
+            'id': self.period.id,
+            'nombre': '2026-1',
+            'anio': 2026,
+        }])
+        self.assertEqual(
+            [item['nombre'] for item in response.data['cursos']],
+            ['Grupo A'],
+        )
+        response = self.client.get(
+            '/api/reportes/filtros/',
+            {'periodo': self.period.id, 'curso': self.other_course.id},
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_selected_filter_keeps_compatible_sibling_options(self):
+        sibling_course = CursoGrupo.objects.create(
+            nombre='Grupo A2',
+            periodo=self.period,
+        )
+        sibling_period = PeriodoAcademico.objects.create(
+            anio=2026,
+            nombre='2026-2',
+        )
+        other_period_course = CursoGrupo.objects.create(
+            nombre='Grupo C',
+            periodo=sibling_period,
+        )
+        sibling_quiz = Cuestionario.objects.create(
+            nombre='Simulacro hermano',
+            curso=sibling_course,
+            nota_aprobar=Decimal('3.00'),
+        )
+        other_period_quiz = Cuestionario.objects.create(
+            nombre='Simulacro otro período',
+            curso=other_period_course,
+            nota_aprobar=Decimal('3.00'),
+        )
+        for quiz in (sibling_quiz, other_period_quiz):
+            CuestionarioPregunta.objects.create(
+                cuestionario=quiz,
+                pregunta=self.question,
+            )
+        self.create_attempt(
+            self.other_student,
+            sibling_quiz,
+            Decimal('3.00'),
+            self.correct,
+        )
+        self.create_attempt(
+            self.other_student,
+            other_period_quiz,
+            Decimal('3.00'),
+            self.correct,
+        )
+
+        self.authenticate(self.admin)
+        response = self.client.get(
+            '/api/reportes/filtros/',
+            {
+                'anio': 2026,
+                'periodo': self.period.id,
+                'curso': self.course.id,
+                'eje': self.axis.id,
+                'estudiante': self.student.id,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            {item['nombre'] for item in response.data['periodos']},
+            {'2026-1', '2026-2'},
+        )
+        self.assertEqual(
+            {item['nombre'] for item in response.data['cursos']},
+            {'Grupo A', 'Grupo A2'},
+        )
+        self.assertEqual(
+            {item['id'] for item in response.data['estudiantes']},
+            {self.student.id, self.other_student.id},
+        )
+
+    def test_indicators_exclude_unfinished_attempt_and_use_quiz_threshold(self):
+        self.authenticate(self.admin)
+        response = self.client.get(
+            '/api/reportes/consultas/',
+            {'tipo': 'consolidado', 'curso': self.course.id},
+        )
+        self.assertEqual(response.status_code, 200)
+        metrics = response.data['indicadores']
+        self.assertEqual(metrics['estudiantes_distintos'], 2)
+        self.assertEqual(metrics['intentos_finalizados'], 2)
+        self.assertEqual(metrics['promedio'], Decimal('3'))
+        self.assertEqual(metrics['minima'], Decimal('2'))
+        self.assertEqual(metrics['maxima'], Decimal('4'))
+        self.assertEqual(metrics['aprobados'], 1)
+        self.assertEqual(metrics['no_aprobados'], 1)
+        self.assertEqual(metrics['porcentaje_aprobacion'], 50)
+        self.assertEqual(metrics['umbrales_aprobacion'], ['3.00'])
+        self.assertEqual(response.data['count'], 3)
+
+    def test_completed_attempt_with_legacy_in_progress_state_is_labeled_sent(self):
+        self.in_progress.enviado = True
+        self.in_progress.fecha_envio = timezone.now()
+        self.in_progress.puntaje = Decimal('5.00')
+        self.in_progress.save(update_fields=(
+            'enviado',
+            'fecha_envio',
+            'puntaje',
+        ))
+
+        self.authenticate(self.admin)
+        response = self.client.get(
+            '/api/reportes/',
+            {'tipo': 'consolidado', 'curso': self.course.id},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['indicadores']['intentos_finalizados'], 3)
+        self.assertEqual(response.data['indicadores']['maxima'], Decimal('5.00'))
+        legacy_row = next(
+            row for row in response.data['results']
+            if row['id'] == self.in_progress.id
+        )
+        self.assertEqual(legacy_row['estado'], Intento.ESTADO_ENVIADO)
+        self.assertEqual(legacy_row['calificacion'], Decimal('5.00'))
+
+        history = self.client.get(
+            f'/api/reportes/historial/{self.student.id}/',
+        )
+        self.assertEqual(history.status_code, 200)
+        legacy_history = next(
+            row for row in history.data
+            if row['id'] == self.in_progress.id
+        )
+        self.assertEqual(legacy_history['estado'], Intento.ESTADO_ENVIADO)
+        self.assertEqual(legacy_history['puntaje'], Decimal('5.00'))
+
+    def test_search_and_sorting(self):
+        self.authenticate(self.admin)
+        response = self.client.get(
+            '/api/reportes/',
+            {
+                'tipo': 'consolidado',
+                'curso': self.course.id,
+                'buscar': 'Pérez',
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['count'], 2)
+        self.assertTrue(all(
+            row['estudiante'] == 'Ana Pérez'
+            for row in response.data['results']
+        ))
+        response = self.client.get(
+            '/api/reportes/',
+            {
+                'tipo': 'consolidado',
+                'curso': self.course.id,
+                'ordenar': 'calificacion',
+                'direccion': 'desc',
+            },
+        )
+        self.assertEqual(
+            [row['calificacion'] for row in response.data['results']],
+            [Decimal('4.00'), Decimal('2.00'), None],
+        )
+
+    def test_pagination_preserves_active_filters(self):
+        for index in range(12):
+            self.create_attempt(
+                self.student,
+                self.quiz,
+                Decimal('4.00'),
+                self.correct,
+            )
+        self.authenticate(self.admin)
+        response = self.client.get(
+            '/api/reportes/',
+            {'curso': self.course.id, 'pagina': 2},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['count'], 15)
+        self.assertEqual(len(response.data['results']), 5)
+        self.assertIn(f'curso={self.course.id}', response.data['previous'])
+
+    def test_individual_history_never_mixes_students(self):
+        self.authenticate(self.admin)
+        response = self.client.get(
+            f'/api/reportes/historial/{self.student.id}/',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+        self.assertTrue(all(
+            item['usuario__username'] == self.student.username
+            for item in response.data
+        ))
+        self.assertEqual(
+            sum(item['estado'] == Intento.ESTADO_EN_CURSO for item in response.data),
+            1,
+        )
+        self.authenticate(self.student)
+        response = self.client.get(
+            f'/api/reportes/historial/{self.other_student.id}/',
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_excel_matches_consolidated_query(self):
+        for _ in range(10):
+            self.create_attempt(
+                self.student,
+                self.quiz,
+                Decimal('4.00'),
+                self.correct,
+            )
+        self.authenticate(self.admin)
+        params = {
+            'tipo': 'consolidado',
+            'curso': self.course.id,
+            'ordenar': 'fecha',
+            'direccion': 'asc',
+        }
+        query = self.client.get('/api/reportes/consultas/', params)
+        all_results = list(query.data['results'])
+        for page_number in range(2, (query.data['count'] + 9) // 10 + 1):
+            page_response = self.client.get(
+                '/api/reportes/consultas/',
+                {**params, 'pagina': page_number},
+            )
+            self.assertEqual(page_response.status_code, 200)
+            all_results.extend(page_response.data['results'])
+
+        export = self.client.get(
+            f'/api/reportes/exportar/consolidado/?curso={self.course.id}'
+            '&ordenar=fecha&direccion=asc',
+        )
+        self.assertEqual(export.status_code, 200)
+        workbook = load_workbook(
+            BytesIO(b''.join(export.streaming_content)),
+            data_only=True,
+        )
+        sheet = workbook['Consolidado general']
+        self.assertEqual(sheet.max_row, len(all_results) + 7)
+        self.assertEqual(len(all_results), query.data['count'])
+        self.assertRegex(
+            sheet['A2'].value,
+            r'^Fecha de generación: \d{2}/\d{2}/\d{4} \d{2}:\d{2}$',
+        )
+        self.assertEqual(
+            sheet['A5'].value,
+            'Las métricas excluyen los intentos no finalizados o sin nota; '
+            'esos intentos se listan con calificación —.',
+        )
+        self.assertEqual(sheet.column_dimensions['A'].width, 8)
+        for offset, result in enumerate(all_results, start=8):
+            self.assertEqual(sheet.cell(offset, 1).value, result['anio'])
+            self.assertEqual(sheet.cell(offset, 2).value, result['periodo'])
+            self.assertEqual(sheet.cell(offset, 3).value, result['curso'])
+            self.assertEqual(sheet.cell(offset, 4).value, result['estudiante'])
+            self.assertEqual(
+                sheet.cell(offset, 5).value,
+                result.get('identificacion', ''),
+            )
+            self.assertEqual(sheet.cell(offset, 6).value, result['simulacro'])
+            result_date = result['fecha']
+            if isinstance(result_date, str):
+                result_date = datetime.fromisoformat(result_date)
+            if timezone.is_aware(result_date):
+                result_date = timezone.localtime(result_date).replace(tzinfo=None)
+            self.assertLessEqual(
+                abs(sheet.cell(offset, 7).value - result_date),
+                timedelta(milliseconds=1),
+            )
+            if result['calificacion'] is not None:
+                self.assertEqual(
+                    sheet.cell(offset, 8).value,
+                    float(result['calificacion']),
+                )
+                self.assertEqual(sheet.cell(offset, 8).number_format, '0.00')
+            else:
+                self.assertEqual(sheet.cell(offset, 8).value, '—')
+            self.assertEqual(
+                sheet.cell(offset, 9).value,
+                dict(Intento.ESTADO_CHOICES)[result['estado']],
+            )
+            self.assertEqual(
+                sheet.cell(offset, 10).value,
+                float(result['nota_aprobar']),
+            )
+        self.assertEqual(
+            workbook['Promedio por estudiante'].cell(9, 1).value,
+            'Ana Pérez',
+        )
+
+    def test_excel_with_no_results_still_returns_headers(self):
+        self.authenticate(self.admin)
+        response = self.client.get(
+            '/api/reportes/exportar/consolidado/?anio=2024',
+        )
+        self.assertEqual(response.status_code, 200)
+        workbook = load_workbook(
+            BytesIO(b''.join(response.streaming_content)),
+            data_only=True,
+        )
+        sheet = workbook['Consolidado general']
+        self.assertEqual(sheet.cell(7, 1).value, 'Año')
+        self.assertEqual(sheet.cell(8, 1).value, 'Sin resultados')
+
+    def test_authentication_permission_and_student_scope(self):
+        response = self.client.get('/api/reportes/')
+        self.assertEqual(response.status_code, 401)
+        self.authenticate(self.no_permission)
+        response = self.client.get('/api/reportes/')
+        self.assertEqual(response.status_code, 403)
+        self.authenticate(self.student)
+        response = self.client.get('/api/reportes/')
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(all(
+            row['estudiante_id'] == self.student.id
+            for row in response.data['results']
+        ))
+        self.assertTrue(all(
+            'identificacion' not in row
+            for row in response.data['results']
+        ))
+        response = self.client.get(
+            '/api/reportes/',
+            {'estudiante': self.other_student.id},
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_axis_report_counts_answered_rows_only_and_keeps_grade_null(self):
+        self.authenticate(self.admin)
+        response = self.client.get(
+            '/api/reportes/',
+            {'tipo': 'ejes', 'curso': self.course.id},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['results']), 1)
+        row = response.data['results'][0]
+        self.assertEqual(row['respuestas_registradas'], 3)
+        self.assertEqual(row['aciertos'], 2)
+        self.assertEqual(row['errores'], 1)
+        self.assertEqual(row['nota_promedio'], None)
+
+    def test_excel_export_is_a_valid_workbook(self):
+        self.authenticate(self.admin)
+        response = self.client.get(
+            f'/api/reportes/exportar/ejes/?curso={self.course.id}',
+        )
+        self.assertEqual(response.status_code, 200)
+        workbook = load_workbook(
+            BytesIO(b''.join(response.streaming_content)),
+            data_only=True,
+        )
+        self.assertIn('Desempeño por eje', workbook.sheetnames)
+        self.assertEqual(
+            workbook['Desempeño por eje'].cell(7, 4).value,
+            'Eje',
+        )
+
+    def test_history_excel_formats_grades_and_marks_unsubmitted_attempts(self):
+        self.authenticate(self.admin)
+        response = self.client.get(
+            f'/api/reportes/exportar/historial/?estudiante={self.student.id}',
+        )
+        self.assertEqual(response.status_code, 200)
+        workbook = load_workbook(
+            BytesIO(b''.join(response.streaming_content)),
+            data_only=False,
+        )
+        sheet = workbook['Historial individual']
+        self.assertEqual(sheet.cell(8, 9).value, 4)
+        self.assertEqual(sheet.cell(8, 9).number_format, '0.00')
+        self.assertEqual(sheet.cell(9, 9).value, '—')
+        self.assertEqual(sheet.cell(7, 10).value, 'Estado')
+        self.assertEqual(sheet.cell(8, 10).value, 'Enviado')
+        self.assertEqual(sheet.cell(9, 10).value, 'En curso')
+        self.assertRegex(
+            sheet['A2'].value,
+            r'^Fecha de generación: \d{2}/\d{2}/\d{4} \d{2}:\d{2}$',
+        )
+        self.assertEqual(
+            sheet['A5'].value,
+            'Las métricas excluyen los intentos no finalizados o sin nota; '
+            'esos intentos se listan con calificación —.',
+        )
+
+
+class SeedReportesTests(TestCase):
+    def test_seed_adds_paginated_results_idempotently_without_rewriting_history(self):
+        call_command('seed_reportes', verbosity=0)
+
+        demo_attempt = Intento.objects.get(
+            usuario__username='demo_estudiante_1',
+            cuestionario__nombre='[DEMO] Simulacro Grupo TyT A',
+            estado=Intento.ESTADO_ENVIADO,
+        )
+        original_answer = RespuestaIntento.objects.get(
+            intento=demo_attempt,
+            pregunta__enunciado='[DEMO TyT] Pregunta de lectura crítica',
+        )
+        demo_attempt.puntaje = Decimal('2.22')
+        demo_attempt.save(update_fields=('puntaje',))
+        original_answer.opcion = original_answer.pregunta.opciones.get(
+            es_correcta=False,
+        )
+        original_answer.save(update_fields=('opcion',))
+
+        pagination_attempts = Intento.objects.filter(
+            cuestionario__nombre__startswith='[DEMO PAGINACIÓN]',
+        )
+        self.assertEqual(pagination_attempts.count(), 18)
+        total_attempts = Intento.objects.count()
+
+        call_command('seed_reportes', verbosity=0)
+
+        self.assertEqual(Intento.objects.count(), total_attempts)
+        self.assertEqual(
+            Intento.objects.filter(
+                cuestionario__nombre__startswith='[DEMO PAGINACIÓN]',
+            ).count(),
+            18,
+        )
+        demo_attempt.refresh_from_db()
+        original_answer.refresh_from_db()
+        self.assertEqual(demo_attempt.puntaje, Decimal('2.22'))
+        self.assertEqual(
+            original_answer.opcion.es_correcta,
+            False,
+        )
+
+        pagination_attempts = Intento.objects.filter(
+            cuestionario__nombre__startswith='[DEMO PAGINACIÓN]',
+            enviado=True,
+            fecha_envio__isnull=False,
+            puntaje__isnull=False,
+        )
+        self.assertEqual(pagination_attempts.count(), 18)
+        self.assertEqual(
+            pagination_attempts.values('usuario_id').distinct().count(),
+            6,
+        )
+        self.assertEqual(
+            set(pagination_attempts.values_list('periodo__nombre', flat=True)),
+            {'2026-1', '2026-2'},
+        )
+        grades = list(
+            pagination_attempts.values_list('puntaje', flat=True).distinct()
+        )
+        self.assertGreaterEqual(min(grades), Decimal('1.50'))
+        self.assertLessEqual(max(grades), Decimal('5.00'))
+        self.assertGreater(len(grades), 3)
+        self.assertTrue(any(grade < Decimal('3.00') for grade in grades))
+        self.assertTrue(any(grade >= Decimal('3.00') for grade in grades))
+        self.assertEqual(
+            RespuestaIntento.objects.filter(
+                intento__in=pagination_attempts,
+                pregunta__enunciado__startswith='[DEMO PAGINACIÓN]',
+                opcion__isnull=False,
+            ).count(),
+            18 * 3,
+        )
+        self.assertEqual(
+            Pregunta.objects.filter(
+                enunciado__startswith='[DEMO PAGINACIÓN]',
+                competencia__nombre__in=(
+                    'Lectura crítica',
+                    'Comprensión ciudadana',
+                    'Pensamiento crítico',
+                ),
+            ).count(),
+            3,
+        )

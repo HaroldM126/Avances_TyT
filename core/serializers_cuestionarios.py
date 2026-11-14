@@ -26,12 +26,21 @@ class CuestionarioSerializer(serializers.ModelSerializer):
         required=False,
     )
     total_preguntas = serializers.SerializerMethodField(read_only=True)
+    requiere_contrasena = serializers.BooleanField(read_only=True)
+    contrasena = serializers.CharField(write_only=True, required=False, allow_blank=True, trim_whitespace=False)
 
     class Meta:
         model = Cuestionario
         fields = (
             'id',
             'nombre',
+            'descripcion',
+            'tematica',
+            'estado',
+            'requiere_contrasena',
+            'contrasena',
+            'publicar_resultado',
+            'curso',
             'fecha_creacion',
             'fecha_apertura',
             'fecha_cierre',
@@ -74,9 +83,11 @@ class CuestionarioSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {'max_intentos': 'Debe ser al menos 1.'}
             )
-        if nota_maxima is not None and nota_maxima <= 0:
+        if nota_maxima is not None and (
+            nota_maxima <= 0 or nota_maxima > Decimal('5.00')
+        ):
             raise serializers.ValidationError(
-                {'nota_maxima': 'Debe ser mayor que cero.'}
+                {'nota_maxima': 'Debe estar entre cero y 5.00.'}
             )
         if nota_aprobar is not None and (
             nota_aprobar < 0 or nota_aprobar > nota_maxima
@@ -97,16 +108,29 @@ class CuestionarioSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         preguntas_data = validated_data.pop('cuestionario_preguntas', [])
+        raw_password = validated_data.pop('contrasena', '')
+        validated_data['estado'] = Cuestionario.ESTADO_BORRADOR
+        validated_data['activo'] = False
+        validated_data['creador'] = self.context['request'].user
         cuestionario = Cuestionario.objects.create(**validated_data)
+        if raw_password:
+            cuestionario.establecer_contrasena(raw_password)
+            cuestionario.save(update_fields=['contrasena_hash'])
         for item in preguntas_data:
             CuestionarioPregunta.objects.create(cuestionario=cuestionario, **item)
         return cuestionario
 
     def update(self, instance, validated_data):
         preguntas_data = validated_data.pop('cuestionario_preguntas', None)
+        raw_password = validated_data.pop('contrasena', None)
+        validated_data.pop('estado', None)
+        validated_data.pop('activo', None)
         for campo, valor in validated_data.items():
             setattr(instance, campo, valor)
         instance.save()
+        if raw_password is not None:
+            instance.establecer_contrasena(raw_password)
+            instance.save(update_fields=['contrasena_hash'])
         if preguntas_data is not None:
             instance.cuestionario_preguntas.all().delete()
             for item in preguntas_data:
@@ -122,6 +146,10 @@ class CuestionarioListSerializer(serializers.ModelSerializer):
         fields = (
             'id',
             'nombre',
+            'descripcion',
+            'tematica',
+            'estado',
+            'curso',
             'fecha_apertura',
             'fecha_cierre',
             'duracion_minutos',
@@ -138,13 +166,23 @@ class CuestionarioListSerializer(serializers.ModelSerializer):
 
 
 class CuestionarioEstudianteSerializer(serializers.ModelSerializer):
+    requiere_contrasena = serializers.BooleanField(read_only=True)
+    curso_nombre = serializers.CharField(source='curso.nombre', read_only=True, allow_null=True)
     total_preguntas = serializers.SerializerMethodField(read_only=True)
+    intentos_realizados = serializers.SerializerMethodField()
+    intentos_restantes = serializers.SerializerMethodField()
+    puede_iniciar = serializers.SerializerMethodField()
+    motivo_bloqueo = serializers.SerializerMethodField()
 
     class Meta:
         model = Cuestionario
         fields = (
             'id',
             'nombre',
+            'descripcion',
+            'tematica',
+            'curso',
+            'curso_nombre',
             'fecha_apertura',
             'fecha_cierre',
             'duracion_minutos',
@@ -152,8 +190,30 @@ class CuestionarioEstudianteSerializer(serializers.ModelSerializer):
             'nota_maxima',
             'nota_aprobar',
             'permitir_revision',
+            'publicar_resultado',
+            'requiere_contrasena',
             'total_preguntas',
+            'intentos_realizados',
+            'intentos_restantes',
+            'puede_iniciar',
+            'motivo_bloqueo',
         )
 
     def get_total_preguntas(self, obj):
         return obj.cuestionario_preguntas.count()
+
+    def get_intentos_realizados(self, obj):
+        user = self.context['request'].user
+        return obj.intento_set.filter(usuario=user).count()
+
+    def get_puede_iniciar(self, obj):
+        return obj.puede_iniciar(self.context['request'].user)[0]
+
+    def get_motivo_bloqueo(self, obj):
+        return obj.puede_iniciar(self.context['request'].user)[1]
+
+    def get_intentos_restantes(self, obj):
+        return max(
+            0,
+            obj.max_intentos - self.get_intentos_realizados(obj),
+        )

@@ -37,3 +37,12 @@ class PuedeConfigurarCuestionarios(BasePermission):
 
     def has_permission(self, request, view):
         return has_active_permission(request.user, 'configure_quizzes')
+
+
+class PuedeConsultarCuestionarios(BasePermission):
+    message = 'No tiene permiso para consultar cuestionarios.'
+
+    def has_permission(self, request, view):
+        return any(has_active_permission(request.user, permission) for permission in (
+            'configure_quizzes', 'manage_question_bank', 'view_results',
+        ))

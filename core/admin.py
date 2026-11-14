@@ -5,8 +5,12 @@ from .models import (
     Competencia,
     Cuestionario,
     CuestionarioPregunta,
+    CursoGrupo,
     Intento,
+    Matricula,
     OpcionRespuesta,
+    PerfilUsuario,
+    PeriodoAcademico,
     Pregunta,
     RespuestaIntento,
     Rol,
@@ -61,6 +65,7 @@ class CuestionarioAdmin(admin.ModelAdmin):
     list_filter = ('activo',)
     search_fields = ('nombre',)
     inlines = [CuestionarioPreguntaInline]
+    autocomplete_fields = ('curso',)
 
 
 @admin.register(OpcionRespuesta)
@@ -74,3 +79,27 @@ admin.site.register(Intento)
 admin.site.register(RespuestaIntento)
 admin.site.register(Rol)
 admin.site.register(SesionJWT)
+admin.site.register(PerfilUsuario)
+
+
+@admin.register(PeriodoAcademico)
+class PeriodoAcademicoAdmin(admin.ModelAdmin):
+    list_display = ('nombre', 'anio')
+    ordering = ('-anio', 'nombre')
+    search_fields = ('nombre',)
+
+
+@admin.register(CursoGrupo)
+class CursoGrupoAdmin(admin.ModelAdmin):
+    list_display = ('nombre', 'periodo')
+    list_filter = ('periodo',)
+    search_fields = ('nombre', 'periodo__nombre')
+    autocomplete_fields = ('periodo',)
+
+
+@admin.register(Matricula)
+class MatriculaAdmin(admin.ModelAdmin):
+    list_display = ('estudiante', 'curso', 'identificacion', 'activa')
+    list_filter = ('activa', 'curso__periodo')
+    search_fields = ('estudiante__username', 'estudiante__first_name', 'estudiante__last_name', 'identificacion')
+    autocomplete_fields = ('estudiante', 'curso')

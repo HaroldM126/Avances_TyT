@@ -62,6 +62,14 @@ def construir_plantilla():
     ]
     ws.append(ejemplo)
 
+    instrucciones = wb.create_sheet('Instrucciones')
+    instrucciones.append(['Cómo diligenciar la plantilla'])
+    instrucciones.append(['Una pregunta por fila. No cambies los nombres de las columnas de la hoja Preguntas.'])
+    instrucciones.append(['categoria y competencia deben existir previamente en el banco de categorías y competencias.'])
+    instrucciones.append(['tipo admite UNICA, MULTIPLE o VF; la estructura actual almacena una sola respuesta correcta por pregunta.'])
+    instrucciones.append(['Deja opcion_c u opcion_d vacías si no las necesitas; VF debe tener exactamente dos opciones.'])
+    instrucciones.append(['puntaje debe ser un número positivo. texto_base, retroalimentacion y explicacion son opcionales.'])
+
     for idx in range(1, len(COLUMNAS_ESPERADAS) + 1):
         letra = ws.cell(row=1, column=idx).column_letter
         ws.column_dimensions[letra].width = 22
@@ -194,7 +202,7 @@ def validar_excel(file_obj):
                 errores.append(f'la opcion {letra} esta marcada como correcta pero no tiene texto')
 
         if tipo in (Pregunta.TIPO_UNICA, Pregunta.TIPO_MULTIPLE) and len(correctas) != 1:
-            errores.append('para UNICA debe haber exactamente 1 correcta')
+            errores.append('este tipo admite exactamente 1 respuesta correcta')
         if tipo == Pregunta.TIPO_VF:
             if len(opciones_validas) != 2:
                 errores.append('para VF debe haber exactamente 2 opciones')
@@ -222,7 +230,7 @@ def validar_excel(file_obj):
 
 
 def guardar_filas(filas_validadas):
-    creadas = 0
+    creadas = []
     for fila in filas_validadas:
         if not fila.valida:
             raise ValueError(f'Fila {fila.numero} invalida')
@@ -250,5 +258,5 @@ def guardar_filas(filas_validadas):
                 es_correcta=opcion['letra'] in datos['correctas'],
                 orden=LETRAS.index(opcion['letra']) + 1,
             )
-        creadas += 1
-    return creadas  
+        creadas.append(pregunta)
+    return creadas

@@ -22,6 +22,8 @@ from openpyxl import Workbook
 from .models import (
     Categoria,
     Competencia,
+    Cuestionario,
+    CuestionarioPregunta,
     FilaImportacionPregunta,
     ImportacionPreguntas,
     Pregunta,
@@ -276,11 +278,23 @@ class ImportarPreviewView(APIView):
             )
         contenido = archivo.read()
         archivo.seek(0)
+        cuestionario = None
+        cuestionario_id = request.data.get('cuestionario_id')
+        if cuestionario_id:
+            try:
+                cuestionario = Cuestionario.objects.get(pk=cuestionario_id)
+            except (Cuestionario.DoesNotExist, ValueError):
+                return Response({'detail': 'El cuestionario seleccionado no existe.'}, status=status.HTTP_404_NOT_FOUND)
+            if not (request.user.is_superuser or request.user.is_staff or cuestionario.creador_id == request.user.id):
+                return Response({'detail': 'No tienes permiso para editar este cuestionario.'}, status=status.HTTP_403_FORBIDDEN)
+            if cuestionario.estado != Cuestionario.ESTADO_BORRADOR:
+                return Response({'detail': 'Solo puedes importar preguntas a un cuestionario en borrador.'}, status=status.HTTP_400_BAD_REQUEST)
         archivo_hash = hashlib.sha256(contenido).hexdigest()
         resultado = validar_excel(archivo)
         if resultado['error_global']:
             importacion = ImportacionPreguntas.objects.create(
                 usuario=request.user,
+                cuestionario=cuestionario,
                 archivo_nombre=archivo.name,
                 archivo_hash=archivo_hash,
                 estado=ImportacionPreguntas.ESTADO_FALLIDA,
@@ -298,6 +312,7 @@ class ImportarPreviewView(APIView):
         invalidas = len(filas) - validas
         importacion = ImportacionPreguntas.objects.create(
             usuario=request.user,
+            cuestionario=cuestionario,
             archivo_nombre=archivo.name,
             archivo_hash=archivo_hash,
             estado=(
@@ -413,7 +428,15 @@ class ImportarConfirmarView(APIView):
             )
         try:
             with transaction.atomic():
-                creadas = guardar_filas(filas)
+                preguntas_creadas = guardar_filas(filas)
+                creadas = len(preguntas_creadas)
+                if importacion.cuestionario_id:
+                    existentes = set(importacion.cuestionario.cuestionario_preguntas.values_list('pregunta_id', flat=True))
+                    CuestionarioPregunta.objects.bulk_create([
+                        CuestionarioPregunta(cuestionario=importacion.cuestionario, pregunta=pregunta, orden=len(existentes) + index)
+                        for index, pregunta in enumerate(preguntas_creadas, start=1)
+                        if pregunta.id not in existentes
+                    ])
         except ValueError as e:
             return Response(
                 {'detail': str(e), 'importacion_id': importacion.id},
@@ -429,6 +452,8 @@ class ImportarConfirmarView(APIView):
             {
                 'detail': f'{creadas} preguntas importadas correctamente.',
                 'importacion_id': importacion.id,
+                'cuestionario_id': importacion.cuestionario_id,
+                'preguntas_asignadas': creadas if importacion.cuestionario_id else 0,
             },
             status=status.HTTP_201_CREATED,
         )
