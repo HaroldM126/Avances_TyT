@@ -36,7 +36,9 @@ class IntentoViewSet(viewsets.ReadOnlyModelViewSet):
             self.request.user,
             'view_results',
         ):
-            return qs
+            if self.request.user.is_superuser or self.request.user.is_staff:
+                return qs
+            return qs.filter(cuestionario__creador=self.request.user)
         return qs.filter(usuario=self.request.user)
 
     def retrieve(self, request, *args, **kwargs):
@@ -144,6 +146,9 @@ class IntentoViewSet(viewsets.ReadOnlyModelViewSet):
                 {'detail': 'La revisión no está habilitada para este cuestionario.'},
                 status=status.HTTP_403_FORBIDDEN,
             )
+        if (intento.usuario_id == request.user.id
+                and not intento.cuestionario.publicar_resultado):
+            return Response({'detail': 'El resultado todavía no ha sido publicado.'}, status=status.HTTP_403_FORBIDDEN)
         respuestas = intento.respuestaintento_set.select_related(
             'pregunta',
             'opcion',

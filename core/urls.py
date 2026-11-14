@@ -32,6 +32,7 @@ from .views_reportes import (
     ExportarReporteView,
     FiltrosReporteView,
     HistorialEstudianteView,
+    ResultadosCuestionarioView,
 )
 
 urlpatterns = [
@@ -93,6 +94,7 @@ urlpatterns = [
         name='cursos_academicos',
     ),
     path('reportes/consultas/', ConsultaReporteView.as_view(), name='reportes_consultas'),
+    path('cuestionarios/<int:cuestionario_id>/resultados/', ResultadosCuestionarioView.as_view(), name='cuestionario_resultados'),
     path(
         'reportes/historial/<int:estudiante_id>/',
         HistorialEstudianteView.as_view(),

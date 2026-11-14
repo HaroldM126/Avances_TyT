@@ -215,6 +215,9 @@ def obtener_indicadores(queryset):
 def obtener_opciones_filtros(params, user):
     """Construye opciones compatibles desde los filtros padre hacia abajo."""
     base = aplicar_filtros(intentos_reporte(), {}, user)
+    if (has_active_permission(user, 'ver_reportes')
+            and not (user.is_superuser or user.is_staff)):
+        base = base.filter(cuestionario__creador=user)
     years = list(
         base.exclude(periodo__isnull=True)
         .values_list('periodo__anio', flat=True)
@@ -461,7 +464,7 @@ def obtener_reporte(tipo, queryset, params, user):
         )
 
     if tipo == 'ejes':
-        answered = _respuestas_por_intento(queryset).exclude(
+        answered = _respuestas_por_intento(intentos_finalizados(queryset)).exclude(
             pregunta__competencia__isnull=True,
         )
         axis_id = _id_param(params, 'eje')
@@ -523,7 +526,7 @@ def obtener_reporte(tipo, queryset, params, user):
         )
 
     if tipo == 'dificultad':
-        answered = _respuestas_por_intento(queryset)
+        answered = _respuestas_por_intento(intentos_finalizados(queryset))
         axis_id = _id_param(params, 'eje')
         if axis_id:
             answered = answered.filter(pregunta__competencia_id=axis_id)

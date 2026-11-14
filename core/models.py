@@ -4,6 +4,7 @@ from django.db import models
 from django.utils import timezone
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import timedelta
+from django.contrib.auth.hashers import check_password, make_password
 
 
 class Categoria(models.Model):
@@ -226,13 +227,23 @@ class CuestionarioQuerySet(models.QuerySet):
         ahora = timezone.now()
         return self.filter(
             activo=True,
+            estado=Cuestionario.ESTADO_PUBLICADO,
             fecha_apertura__lte=ahora,
             fecha_cierre__gte=ahora,
         )
 
 
 class Cuestionario(models.Model):
+    ESTADO_BORRADOR = 'BORRADOR'
+    ESTADO_PUBLICADO = 'PUBLICADO'
+    ESTADO_CHOICES = ((ESTADO_BORRADOR, 'Borrador'), (ESTADO_PUBLICADO, 'Publicado'))
     nombre = models.CharField(max_length=100)
+    descripcion = models.TextField(blank=True)
+    tematica = models.CharField(max_length=150, blank=True)
+    estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default=ESTADO_BORRADOR)
+    creador = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='cuestionarios_creados')
+    contrasena_hash = models.CharField(max_length=128, blank=True)
+    publicar_resultado = models.BooleanField(default=True)
     curso = models.ForeignKey(
         CursoGrupo,
         on_delete=models.SET_NULL,
@@ -248,7 +259,7 @@ class Cuestionario(models.Model):
     nota_maxima = models.DecimalField(max_digits=5, decimal_places=2, default=5)
     nota_aprobar = models.DecimalField(max_digits=5, decimal_places=2, default=0)
     permitir_revision = models.BooleanField(default=True)
-    activo = models.BooleanField(default=True)
+    activo = models.BooleanField(default=False)
 
     objects = CuestionarioQuerySet.as_manager()
 
@@ -300,6 +311,8 @@ class Cuestionario(models.Model):
         """Devuelve (bool, motivo). Si puede, (True, '')."""
         if not self.activo:
             return False, 'El cuestionario está inactivo.'
+        if self.estado != self.ESTADO_PUBLICADO:
+            return False, 'El cuestionario todavía no está publicado.'
         if self.fecha_apertura is None or self.fecha_cierre is None:
             return False, 'El cuestionario aún no tiene fechas configuradas.'
         ahora = timezone.now()
@@ -319,6 +332,16 @@ class Cuestionario(models.Model):
         if intentos_previos >= self.max_intentos:
             return False, 'Has agotado el número de intentos permitidos.'
         return True, ''
+
+    @property
+    def requiere_contrasena(self):
+        return bool(self.contrasena_hash)
+
+    def establecer_contrasena(self, raw_password):
+        self.contrasena_hash = make_password(raw_password) if raw_password else ''
+
+    def validar_contrasena(self, raw_password):
+        return not self.contrasena_hash or check_password(raw_password or '', self.contrasena_hash)
 
     def validar_preguntas(self):
         errores = []
@@ -482,6 +505,7 @@ class ImportacionPreguntas(models.Model):
     )
 
     usuario = models.ForeignKey(User, on_delete=models.PROTECT)
+    cuestionario = models.ForeignKey(Cuestionario, on_delete=models.SET_NULL, null=True, blank=True, related_name='importaciones_preguntas')
     archivo_nombre = models.CharField(max_length=255)
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES)
     total = models.PositiveIntegerField(default=0)

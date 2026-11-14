@@ -142,3 +142,6 @@ python manage.py seed_reportes
 Consulta [docs/ESQUEMA_MODELOS.md](docs/ESQUEMA_MODELOS.md) para el modelo de
 datos y [docs/EVIDENCIAS.md](docs/EVIDENCIAS.md) para decisiones y una guía de
 demostración.
+
+Para instalar y presentar el flujo completo de evaluación docente y estudiante,
+consulta [docs/GUIA_PRESENTACION.md](docs/GUIA_PRESENTACION.md).

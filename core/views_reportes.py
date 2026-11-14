@@ -4,6 +4,7 @@ from datetime import date
 from datetime import datetime
 from decimal import Decimal
 from io import BytesIO
+from django.db.models import Avg
 
 from django.http import FileResponse
 from django.utils import timezone
@@ -15,9 +16,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.pagination import PageNumberPagination
 
-from .models import Intento
-from .permissions import has_active_permission
+from .models import Competencia, Cuestionario, Intento, RespuestaIntento
 from .permissions import PuedeConfigurarCuestionarios
+from .permissions import has_active_permission
 from .services.reportes import (
     aplicar_filtros,
     estado_intento_reporte,
@@ -95,6 +96,9 @@ class ConsultaReporteView(APIView):
             request.query_params,
             request.user,
         )
+        if (has_active_permission(request.user, 'ver_reportes')
+                and not (request.user.is_superuser or request.user.is_staff)):
+            queryset = queryset.filter(cuestionario__creador=request.user)
         indicadores = obtener_indicadores(queryset)
         umbrales = list(
             queryset.order_by()
@@ -163,6 +167,84 @@ class ConsultaReporteView(APIView):
         })
 
 
+class ResultadosCuestionarioView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request, cuestionario_id):
+        cuestionario = Cuestionario.objects.filter(pk=cuestionario_id).first()
+        if cuestionario is None:
+            return Response({'detail': 'El cuestionario no existe.'}, status=404)
+        es_administrador = request.user.is_superuser or request.user.is_staff
+        es_propietario_autorizado = (
+            cuestionario.creador_id == request.user.id
+            and (has_active_permission(request.user, 'view_results')
+                 or has_active_permission(request.user, 'configure_quizzes'))
+        )
+        if not (es_administrador or es_propietario_autorizado):
+            return Response({'detail': 'No tienes permiso para consultar esta evaluación.'}, status=403)
+
+        intentos = Intento.objects.filter(cuestionario=cuestionario).select_related('usuario')
+        finalizados = intentos.filter(enviado=True, fecha_envio__isnull=False, puntaje__isnull=False)
+        ids_finalizados = set(finalizados.values_list('id', flat=True))
+        aprobados = finalizados.filter(puntaje__gte=cuestionario.nota_aprobar).count()
+        reprobados = finalizados.count() - aprobados
+        respuestas = RespuestaIntento.objects.filter(intento__in=finalizados, opcion__isnull=False).select_related('pregunta__competencia', 'opcion')
+
+        preguntas = []
+        for relacion in cuestionario.cuestionario_preguntas.select_related('pregunta__competencia'):
+            rows = respuestas.filter(pregunta=relacion.pregunta)
+            total = rows.count()
+            correctas = rows.filter(opcion__es_correcta=True).count()
+            preguntas.append({
+                'pregunta_id': relacion.pregunta_id,
+                'enunciado': relacion.pregunta.enunciado,
+                'eje': relacion.pregunta.competencia.nombre if relacion.pregunta.competencia_id else '',
+                'respuestas': total,
+                'aciertos': correctas,
+                'errores': total - correctas,
+                'porcentaje_aciertos': round(correctas * 100 / total, 2) if total else 0,
+            })
+        ejes = []
+        for competencia in Competencia.objects.filter(preguntas__cuestionario_preguntas__cuestionario=cuestionario).distinct():
+            rows = respuestas.filter(pregunta__competencia=competencia)
+            total = rows.count()
+            aciertos = rows.filter(opcion__es_correcta=True).count()
+            ejes.append({'eje': competencia.nombre, 'respuestas': total, 'aciertos': aciertos,
+                         'errores': total - aciertos,
+                         'porcentaje_aciertos': round(aciertos * 100 / total, 2) if total else 0})
+        con_respuestas = [row for row in ejes if row['respuestas']]
+        participantes = intentos.values('usuario_id').distinct().count()
+        distribucion = []
+        for inicio in range(0, 5):
+            fin = inicio + 1
+            filtro = {'puntaje__gte': inicio, 'puntaje__lte' if fin == 5 else 'puntaje__lt': fin}
+            conteo = finalizados.filter(**filtro).count()
+            distribucion.append({'rango': f'{inicio}–{fin}', 'cantidad': conteo})
+        filas = []
+        for intento in intentos.order_by('usuario__last_name', 'usuario__first_name', '-fecha_inicio'):
+            filas.append({
+                'intento_id': intento.id,
+                'estudiante': (f'{intento.usuario.first_name} {intento.usuario.last_name}'.strip() or intento.usuario.username),
+                'estado': intento.estado,
+                'fecha_envio': intento.fecha_envio,
+                'calificacion': intento.puntaje if intento.id in ids_finalizados else None,
+                'aprobado': (intento.puntaje >= cuestionario.nota_aprobar) if intento.id in ids_finalizados else None,
+            })
+        return Response({
+            'cuestionario': {'id': cuestionario.id, 'nombre': cuestionario.nombre,
+                             'nota_aprobar': cuestionario.nota_aprobar},
+            'indicadores': {'participantes': participantes, 'intentos_finalizados': finalizados.count(),
+                            'aprobados': aprobados, 'reprobados': reprobados,
+                            'promedio': finalizados.aggregate(promedio=Avg('puntaje'))['promedio']},
+            'distribucion': distribucion,
+            'intentos': filas,
+            'preguntas': preguntas,
+            'ejes': ejes,
+            'eje_mayor_acierto': max(con_respuestas, key=lambda row: row['porcentaje_aciertos']) if con_respuestas else None,
+            'eje_mas_dificil': min(con_respuestas, key=lambda row: row['porcentaje_aciertos']) if con_respuestas else None,
+        })
+
+
 class HistorialEstudianteView(APIView):
     permission_classes = (PuedeConsultarReportes,)
 
@@ -174,6 +256,9 @@ class HistorialEstudianteView(APIView):
             params,
             request.user,
         )
+        if (has_active_permission(request.user, 'ver_reportes')
+                and not (request.user.is_superuser or request.user.is_staff)):
+            queryset = queryset.filter(cuestionario__creador=request.user)
         rows = list(obtener_reporte('historial', queryset, params, request.user))
         for row in rows:
             row['fecha'] = row['fecha_envio'] or row['fecha_inicio']
@@ -357,6 +442,9 @@ class ExportarReporteView(APIView):
             params,
             request.user,
         )
+        if (has_active_permission(request.user, 'ver_reportes')
+                and not (request.user.is_superuser or request.user.is_staff)):
+            queryset = queryset.filter(cuestionario__creador=request.user)
 
         if tipo == 'consolidado':
             rows = _consolidated_excel_rows(

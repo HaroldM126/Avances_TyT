@@ -57,6 +57,8 @@ export const cambiarEstadoCuestionario = (id, activo) =>
     method: 'POST',
     body: '{}',
   })
+export const obtenerResultadosCuestionario = (id) =>
+  apiRequest(`/api/cuestionarios/${id}/resultados/`)
 
 export const obtenerUsuarios = () => apiRequest('/api/users/')
 export const guardarUsuario = (data, id) =>
@@ -141,9 +143,10 @@ export const actualizarImportacion = (id, filas) =>
     body: JSON.stringify({ filas }),
   })
 
-export async function previsualizarImportacion(file) {
+export async function previsualizarImportacion(file, cuestionarioId = '') {
   const form = new FormData()
   form.append('archivo', file)
+  if (cuestionarioId) form.append('cuestionario_id', cuestionarioId)
   const response = await fetch('/api/preguntas/importar/preview/', {
     method: 'POST',
     headers: { Authorization: `Bearer ${localStorage.getItem('simulador.access')}` },

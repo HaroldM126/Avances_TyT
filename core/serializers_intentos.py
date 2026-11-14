@@ -71,6 +71,17 @@ class IntentoSerializer(serializers.ModelSerializer):
         read_only=True,
     )
     fecha_limite = serializers.SerializerMethodField()
+    resultado_publicado = serializers.SerializerMethodField()
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get('request')
+        if (request and instance.usuario_id == request.user.id
+                and not instance.cuestionario.publicar_resultado):
+            data['puntaje'] = None
+            data['calificacion_final'] = None
+            data['aprobado'] = None
+        return data
 
     class Meta:
         model = Intento
@@ -89,6 +100,7 @@ class IntentoSerializer(serializers.ModelSerializer):
             'nota_maxima',
             'nota_aprobar',
             'aprobado',
+            'resultado_publicado',
             'preguntas_sin_responder',
             'duracion_minutos',
             'revision_habilitada',
@@ -109,6 +121,10 @@ class IntentoSerializer(serializers.ModelSerializer):
 
     def get_aprobado(self, obj):
         return obj.enviado and obj.puntaje >= obj.cuestionario.nota_aprobar
+
+    def get_resultado_publicado(self, obj):
+        request = self.context.get('request')
+        return bool(obj.cuestionario.publicar_resultado or (request and (request.user.is_staff or request.user.is_superuser)))
 
     def get_preguntas_sin_responder(self, obj):
         return obj.respuestaintento_set.filter(opcion__isnull=True).count()

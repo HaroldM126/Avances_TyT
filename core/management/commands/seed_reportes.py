@@ -34,6 +34,7 @@ class Command(BaseCommand):
     help = 'Crea períodos, cursos, estudiantes y resultados de ejemplo.'
 
     def handle(self, *args, **options):
+        demo_owner = User.objects.filter(is_superuser=True).order_by('id').first()
         periods = {}
         for year in (2025, 2026):
             for term in (1, 2):
@@ -96,8 +97,11 @@ class Command(BaseCommand):
                     'nota_aprobar': Decimal('3.00'),
                     'permitir_revision': True,
                     'activo': True,
+                    'estado': Cuestionario.ESTADO_PUBLICADO,
+                    'creador': demo_owner,
                 },
             )
+            self._publicar_demo(quiz, demo_owner)
             for order, (question, _, _) in enumerate(questions, start=1):
                 CuestionarioPregunta.objects.get_or_create(
                     cuestionario=quiz,
@@ -218,8 +222,11 @@ class Command(BaseCommand):
                         'nota_aprobar': Decimal('3.00'),
                         'permitir_revision': True,
                         'activo': True,
+                        'estado': Cuestionario.ESTADO_PUBLICADO,
+                        'creador': demo_owner,
                     },
                 )
+                self._publicar_demo(quiz, demo_owner)
                 for order, (question, _, _) in enumerate(
                     pagination_questions,
                     start=1,
@@ -312,3 +319,18 @@ class Command(BaseCommand):
             f'6 estudiantes, {demo_attempts} intentos finalizados '
             'y 2 en curso.'
         ))
+
+    @staticmethod
+    def _publicar_demo(quiz, owner):
+        fields = []
+        if not quiz.activo:
+            quiz.activo = True
+            fields.append('activo')
+        if quiz.estado != Cuestionario.ESTADO_PUBLICADO:
+            quiz.estado = Cuestionario.ESTADO_PUBLICADO
+            fields.append('estado')
+        if owner and not quiz.creador_id:
+            quiz.creador = owner
+            fields.append('creador')
+        if fields:
+            quiz.save(update_fields=fields)
