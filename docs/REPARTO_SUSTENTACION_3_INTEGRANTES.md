@@ -5,7 +5,7 @@
 
 ---
 
-## Integrante 1: Arquitectura, Base de Datos en la Nube y Despliegue (Actividades 2 y 3)
+## Integrante 1 (Ana Zuñiga): Arquitectura, Base de Datos en la Nube y Despliegue (Actividades 2 y 3)
 
 ### Responsabilidades en la exposición
 1. **Contexto del proyecto y repositorio GitHub:** mostrar la estructura (`config/`, `core/`, `frontend/`, `requirements.txt`, `.gitignore` excluyendo `.env`, `.venv`, backups `.sql`).
@@ -26,7 +26,7 @@
 
 ---
 
-## Integrante 2: API REST, Swagger / OpenAPI y Pruebas de Autorización (Actividad 1 y parte de Actividad 4)
+## Integrante 2 (Harold Meneses): API REST, Swagger / OpenAPI y Pruebas de Autorización (Actividad 1 y parte de Actividad 4)
 
 ### Responsabilidades en la exposición
 1. **Integración de `drf-spectacular`:**
@@ -50,7 +50,7 @@
 
 ---
 
-## Integrante 3: Flujo Funcional Integral, Calificación, Reportes y Persistencia en MariaDB (Actividad 4)
+## Integrante 3 (Jamilton Legarda): Flujo Funcional Integral, Calificación, Reportes y Persistencia en MariaDB (Actividad 4)
 
 ### Responsabilidades en la exposición
 1. **CRUD y persistencia en MariaDB remota:**
