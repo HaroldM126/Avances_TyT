@@ -54,7 +54,7 @@ class CuestionarioSerializer(serializers.ModelSerializer):
             'total_preguntas',
         )
 
-    def get_total_preguntas(self, obj):
+    def get_total_preguntas(self, obj) -> int:
         return obj.cuestionario_preguntas.count()
 
     def validate(self, data):
@@ -161,7 +161,7 @@ class CuestionarioListSerializer(serializers.ModelSerializer):
             'total_preguntas',
         )
 
-    def get_total_preguntas(self, obj):
+    def get_total_preguntas(self, obj) -> int:
         return obj.cuestionario_preguntas.count()
 
 
@@ -199,20 +199,20 @@ class CuestionarioEstudianteSerializer(serializers.ModelSerializer):
             'motivo_bloqueo',
         )
 
-    def get_total_preguntas(self, obj):
+    def get_total_preguntas(self, obj) -> int:
         return obj.cuestionario_preguntas.count()
 
-    def get_intentos_realizados(self, obj):
+    def get_intentos_realizados(self, obj) -> int:
         user = self.context['request'].user
         return obj.intento_set.filter(usuario=user).count()
 
-    def get_puede_iniciar(self, obj):
+    def get_puede_iniciar(self, obj) -> bool:
         return obj.puede_iniciar(self.context['request'].user)[0]
 
-    def get_motivo_bloqueo(self, obj):
+    def get_motivo_bloqueo(self, obj) -> str:
         return obj.puede_iniciar(self.context['request'].user)[1]
 
-    def get_intentos_restantes(self, obj):
+    def get_intentos_restantes(self, obj) -> int:
         return max(
             0,
             obj.max_intentos - self.get_intentos_realizados(obj),

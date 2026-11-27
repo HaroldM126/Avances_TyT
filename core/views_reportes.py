@@ -8,6 +8,8 @@ from django.db.models import Avg
 
 from django.http import FileResponse
 from django.utils import timezone
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from rest_framework.exceptions import ValidationError
@@ -69,6 +71,19 @@ class ReportPagination(PageNumberPagination):
 class FiltrosReporteView(APIView):
     permission_classes = (PuedeConsultarReportes,)
 
+    @extend_schema(
+        tags=['Reportes'],
+        summary='Consultar opciones jerárquicas de filtros para reportes',
+        parameters=[
+            OpenApiParameter('anio', OpenApiTypes.INT, OpenApiParameter.QUERY, required=False),
+            OpenApiParameter('periodo', OpenApiTypes.INT, OpenApiParameter.QUERY, required=False),
+            OpenApiParameter('curso', OpenApiTypes.INT, OpenApiParameter.QUERY, required=False),
+            OpenApiParameter('eje', OpenApiTypes.INT, OpenApiParameter.QUERY, required=False),
+            OpenApiParameter('estudiante', OpenApiTypes.INT, OpenApiParameter.QUERY, required=False),
+            OpenApiParameter('buscar', OpenApiTypes.STR, OpenApiParameter.QUERY, required=False),
+        ],
+        responses={200: OpenApiResponse(description='Opciones disponibles de filtros')},
+    )
     def get(self, request):
         return Response(obtener_opciones_filtros(request.query_params, request.user))
 
@@ -77,6 +92,34 @@ class ConsultaReporteView(APIView):
     permission_classes = (PuedeConsultarReportes,)
     pagination_class = ReportPagination
 
+    @extend_schema(
+        tags=['Reportes'],
+        summary='Consultar reportes filtrados por año, curso y eje temático',
+        description=(
+            'Genera consultas académicas paginadas (consolidado, periodos, cursos, ejes, '
+            'calificaciones, historial, dificultad) aplicando filtros por año, período, curso, '
+            'eje temático, estudiante y búsqueda, respetando el alcance del rol.'
+        ),
+        parameters=[
+            OpenApiParameter('tipo', OpenApiTypes.STR, OpenApiParameter.QUERY, required=False, enum=sorted(REPORT_TYPES), description='Tipo de consulta (por defecto: consolidado)'),
+            OpenApiParameter('anio', OpenApiTypes.INT, OpenApiParameter.QUERY, required=False, description='Año académico (ej. 2026)'),
+            OpenApiParameter('periodo', OpenApiTypes.INT, OpenApiParameter.QUERY, required=False, description='ID del período académico'),
+            OpenApiParameter('curso', OpenApiTypes.INT, OpenApiParameter.QUERY, required=False, description='ID del curso o grupo'),
+            OpenApiParameter('eje', OpenApiTypes.INT, OpenApiParameter.QUERY, required=False, description='ID del eje temático (Competencia)'),
+            OpenApiParameter('estudiante', OpenApiTypes.INT, OpenApiParameter.QUERY, required=False, description='ID del estudiante'),
+            OpenApiParameter('buscar', OpenApiTypes.STR, OpenApiParameter.QUERY, required=False, description='Búsqueda por nombre, usuario o identificación'),
+            OpenApiParameter('ordenar', OpenApiTypes.STR, OpenApiParameter.QUERY, required=False, enum=['nombre', 'fecha', 'calificacion']),
+            OpenApiParameter('direccion', OpenApiTypes.STR, OpenApiParameter.QUERY, required=False, enum=['asc', 'desc']),
+            OpenApiParameter('pagina', OpenApiTypes.INT, OpenApiParameter.QUERY, required=False, description='Número de página (10 registros por página)'),
+        ],
+        responses={
+            200: OpenApiResponse(description='Resultados paginados e indicadores del reporte'),
+            400: OpenApiResponse(description='Parámetros de filtro inválidos'),
+            401: OpenApiResponse(description='No autenticado'),
+            403: OpenApiResponse(description='Sin permisos para consultar reportes'),
+            404: OpenApiResponse(description='Filtro o recurso no encontrado'),
+        },
+    )
     def get(self, request):
         tipo = request.query_params.get('tipo', 'consolidado')
         if tipo not in REPORT_TYPES:
@@ -170,6 +213,11 @@ class ConsultaReporteView(APIView):
 class ResultadosCuestionarioView(APIView):
     permission_classes = (IsAuthenticated,)
 
+    @extend_schema(
+        tags=['Resultados'],
+        summary='Consultar resultados detallados por cuestionario',
+        responses={200: OpenApiResponse(description='Indicadores, distribución e intentos del cuestionario')},
+    )
     def get(self, request, cuestionario_id):
         cuestionario = Cuestionario.objects.filter(pk=cuestionario_id).first()
         if cuestionario is None:
@@ -248,6 +296,11 @@ class ResultadosCuestionarioView(APIView):
 class HistorialEstudianteView(APIView):
     permission_classes = (PuedeConsultarReportes,)
 
+    @extend_schema(
+        tags=['Reportes'],
+        summary='Consultar historial cronológico de un estudiante',
+        responses={200: OpenApiResponse(description='Lista cronológica de intentos del estudiante')},
+    )
     def get(self, request, estudiante_id):
         params = request.query_params.copy()
         params['estudiante'] = str(estudiante_id)
@@ -415,6 +468,11 @@ def _consolidated_excel_rows(queryset, user, params):
 class ExportarReporteView(APIView):
     permission_classes = (PuedeConsultarReportes,)
 
+    @extend_schema(
+        tags=['Reportes'],
+        summary='Exportar reporte en formato Excel (.xlsx)',
+        responses={200: OpenApiTypes.BINARY},
+    )
     def get(self, request, tipo):
         if tipo not in EXCEL_TYPES:
             raise ValidationError({
@@ -610,6 +668,11 @@ class ExportarReporteView(APIView):
 class CursosAcademicosView(APIView):
     permission_classes = (IsAuthenticated, PuedeConfigurarCuestionarios)
 
+    @extend_schema(
+        tags=['Simulacros'],
+        summary='Listar cursos académicos disponibles',
+        responses={200: OpenApiResponse(description='Lista de cursos académicos')},
+    )
     def get(self, request):
         from .models import CursoGrupo
 

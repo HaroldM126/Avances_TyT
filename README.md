@@ -16,10 +16,14 @@ SimpleJWT
 
 Configuración local
 
-La aplicación usa MySQL por defecto. Configura `MYSQL_DATABASE`, `MYSQL_USER`,
-`MYSQL_PASSWORD`, `MYSQL_HOST` y `MYSQL_PORT`. También define
-`DJANGO_SECRET_KEY` y `DJANGO_ALLOWED_HOSTS`; para pruebas locales sin MySQL
-puedes usar `DJANGO_USE_SQLITE=1`.
+La aplicación usa MariaDB/MySQL por defecto mediante `django.db.backends.mysql` y `PyMySQL`. Configura `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST` y `DB_PORT` (también admite `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_HOST` y `MYSQL_PORT`), además de `DB_SSL_MODE` / `DB_SSL_CA` para conexiones TLS en la nube. Define `SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS` y `CSRF_TRUSTED_ORIGINS` (consulta `.env.example`). Para pruebas locales rápidas sin MariaDB/MySQL puedes usar `DJANGO_USE_SQLITE=1`.
+
+Documentación API REST (Swagger / OpenAPI)
+
+- `GET /api/schema/`: esquema OpenAPI 3.0 generado con `drf-spectacular`.
+- `GET /api/docs/`: interfaz interactiva Swagger UI con soporte JWT Bearer (`Authorize`).
+- `GET /api/health/`: verificación de conectividad con la base de datos (`SELECT 1`).
+- Operaciones principales de referencia: `GET /api/simulacros/`, `GET /api/preguntas/`, `PATCH /api/preguntas/{id}/`, `POST /api/intentos/`, `GET /api/resultados/` y `GET /api/reportes/`.
 
 Configuración del administrador inicial
 

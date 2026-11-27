@@ -1,4 +1,5 @@
-from rest_framework import generics, status
+from drf_spectacular.utils import OpenApiResponse, extend_schema, inline_serializer
+from rest_framework import generics, serializers, status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -25,10 +26,12 @@ from .serializers import (
 from .serializers_password import ChangePasswordSerializer
 
 
+@extend_schema(tags=['Autenticación'], summary='Iniciar sesión y obtener tokens JWT')
 class AuthTokenView(TokenObtainPairView):
     serializer_class = AuthTokenSerializer
 
 
+@extend_schema(tags=['Autenticación'], summary='Configurar administrador inicial')
 class InitialAdminView(generics.CreateAPIView):
     serializer_class = InitialAdminSerializer
     permission_classes = (AllowAny,)
@@ -47,6 +50,7 @@ class InitialAdminView(generics.CreateAPIView):
         return super().create(request, *args, **kwargs)
 
 
+@extend_schema(tags=['Autenticación'], summary='Renovar token JWT de acceso')
 class SessionTokenRefreshView(TokenRefreshView):
     def post(self, request, *args, **kwargs):
         response = super().post(request, *args, **kwargs)
@@ -72,6 +76,18 @@ class SessionTokenRefreshView(TokenRefreshView):
         return response
 
 
+@extend_schema(
+    tags=['Autenticación'],
+    summary='Cerrar sesión e invalidar refresh token',
+    request=inline_serializer(
+        name='LogoutInput',
+        fields={'refresh': serializers.CharField()},
+    ),
+    responses={
+        205: OpenApiResponse(description='Sesión cerrada'),
+        400: OpenApiResponse(description='Refresh token inválido'),
+    },
+)
 class LogoutView(APIView):
     permission_classes = (IsAuthenticated,)
 
@@ -102,6 +118,7 @@ class LogoutView(APIView):
         return Response(status=status.HTTP_205_RESET_CONTENT)
 
 
+@extend_schema(tags=['Autenticación'], summary='Consultar perfil y permisos del usuario autenticado')
 class MeView(generics.RetrieveAPIView):
     serializer_class = UserSerializer
     permission_classes = (IsAuthenticated,)
@@ -110,6 +127,18 @@ class MeView(generics.RetrieveAPIView):
         return self.request.user
 
 
+@extend_schema(
+    tags=['Autenticación'],
+    summary='Cambiar contraseña del usuario autenticado',
+    request=ChangePasswordSerializer,
+    responses={
+        200: inline_serializer(
+            name='ChangePasswordOk',
+            fields={'detail': serializers.CharField()},
+        ),
+        400: OpenApiResponse(description='Contraseña actual o nueva inválida'),
+    },
+)
 class ChangePasswordView(APIView):
     permission_classes = (IsAuthenticated,)
 
@@ -124,18 +153,21 @@ class ChangePasswordView(APIView):
         return Response({'detail': 'Contraseña actualizada correctamente.'})
 
 
+@extend_schema(tags=['Usuarios y Roles'], summary='Listar o crear usuarios')
 class UserListCreateView(generics.ListCreateAPIView):
     queryset = User.objects.prefetch_related('groups').order_by('username')
     serializer_class = UserSerializer
     permission_classes = (IsAuthenticated, HasManageUsersPermission)
 
 
+@extend_schema(tags=['Usuarios y Roles'], summary='Consultar o actualizar un usuario')
 class UserDetailView(generics.RetrieveUpdateAPIView):
     queryset = User.objects.prefetch_related('groups')
     serializer_class = UserSerializer
     permission_classes = (IsAuthenticated, HasManageUsersPermission)
 
 
+@extend_schema(tags=['Usuarios y Roles'], summary='Listar o crear roles personalizados')
 class RoleListCreateView(generics.ListCreateAPIView):
     queryset = Rol.objects.select_related('grupo').prefetch_related(
         'grupo__permissions'
@@ -144,6 +176,7 @@ class RoleListCreateView(generics.ListCreateAPIView):
     permission_classes = (IsAuthenticated, HasManageRolesPermission)
 
 
+@extend_schema(tags=['Usuarios y Roles'], summary='Consultar, actualizar o eliminar un rol')
 class RoleDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Rol.objects.select_related('grupo').prefetch_related(
         'grupo__permissions'
@@ -152,6 +185,7 @@ class RoleDetailView(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = (IsAuthenticated, HasManageRolesPermission)
 
 
+@extend_schema(tags=['Usuarios y Roles'], summary='Listar permisos disponibles para roles')
 class PermissionListView(generics.ListAPIView):
     queryset = Permission.objects.filter(
         content_type__app_label='core',

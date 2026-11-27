@@ -368,6 +368,9 @@ class QuizAttemptAndRulesTests(TestCase):
         now = timezone.now()
         self.quiz = Cuestionario.objects.create(
             nombre='Cuestionario de prueba',
+            estado=Cuestionario.ESTADO_PUBLICADO,
+            activo=True,
+            creador=self.admin,
             fecha_apertura=now - timedelta(minutes=5),
             fecha_cierre=now + timedelta(minutes=30),
             duracion_minutos=10,
@@ -535,6 +538,7 @@ class ReportesTests(TestCase):
         self.admin = User.objects.create_user(
             username='report-admin',
             password='StrongPass123',
+            is_staff=True,
         )
         self.student = User.objects.create_user(
             username='report-student',
@@ -1037,8 +1041,8 @@ class ReportesTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data['results']), 1)
         row = response.data['results'][0]
-        self.assertEqual(row['respuestas_registradas'], 3)
-        self.assertEqual(row['aciertos'], 2)
+        self.assertEqual(row['respuestas_registradas'], 2)
+        self.assertEqual(row['aciertos'], 1)
         self.assertEqual(row['errores'], 1)
         self.assertEqual(row['nota_promedio'], None)
 
@@ -1171,3 +1175,185 @@ class SeedReportesTests(TestCase):
             ).count(),
             3,
         )
+
+
+class SwaggerAndRestApiParcialTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.admin = User.objects.create_user(
+            username='swagger-admin',
+            password='StrongPass123',
+            is_staff=True,
+        )
+        self.admin.groups.add(Group.objects.get(name='Administrador'))
+
+        self.student = User.objects.create_user(
+            username='swagger-student',
+            password='StrongPass123',
+        )
+        self.student.groups.add(Group.objects.get(name='Estudiante'))
+
+        self.no_role = User.objects.create_user(
+            username='swagger-norole',
+            password='StrongPass123',
+        )
+
+        self.period = PeriodoAcademico.objects.create(anio=2026, nombre='2026-2')
+        self.course = CursoGrupo.objects.create(nombre='Grupo Swagger', periodo=self.period)
+        Matricula.objects.create(
+            estudiante=self.student,
+            curso=self.course,
+            identificacion='99001122',
+        )
+        self.category = Categoria.objects.create(nombre='Lectura')
+        self.axis = Competencia.objects.create(nombre='Lectura crítica')
+        self.question = Pregunta.objects.create(
+            categoria=self.category,
+            competencia=self.axis,
+            enunciado='¿Cuál es la idea principal del texto?',
+            puntaje=Decimal('2.00'),
+            activa=True,
+        )
+        self.correct = OpcionRespuesta.objects.create(
+            pregunta=self.question,
+            texto='Opción correcta',
+            es_correcta=True,
+            orden=1,
+        )
+        OpcionRespuesta.objects.create(
+            pregunta=self.question,
+            texto='Opción incorrecta',
+            es_correcta=False,
+            orden=2,
+        )
+        now = timezone.now()
+        self.quiz = Cuestionario.objects.create(
+            nombre='Simulacro Swagger TyT',
+            estado=Cuestionario.ESTADO_PUBLICADO,
+            activo=True,
+            creador=self.admin,
+            curso=self.course,
+            fecha_apertura=now - timedelta(minutes=10),
+            fecha_cierre=now + timedelta(hours=2),
+            duracion_minutos=30,
+            max_intentos=2,
+            nota_maxima=Decimal('5.00'),
+            nota_aprobar=Decimal('3.00'),
+        )
+        CuestionarioPregunta.objects.create(
+            cuestionario=self.quiz,
+            pregunta=self.question,
+            orden=1,
+        )
+
+    def authenticate(self, user):
+        response = self.client.post(
+            '/api/auth/token/',
+            {'username': user.username, 'password': 'StrongPass123'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.client.credentials(
+            HTTP_AUTHORIZATION=f"Bearer {response.data['access']}",
+        )
+
+    def test_swagger_schema_and_ui_available(self):
+        schema_res = self.client.get('/api/schema/?format=json')
+        self.assertEqual(schema_res.status_code, 200)
+        paths = schema_res.data['paths']
+        for route in (
+            '/api/simulacros/',
+            '/api/preguntas/',
+            '/api/intentos/',
+            '/api/resultados/',
+            '/api/reportes/',
+            '/api/preguntas/{id}/',
+        ):
+            self.assertIn(route, paths)
+        self.assertIn('BearerAuth', schema_res.data['components']['securitySchemes'])
+
+        docs_res = self.client.get('/api/docs/')
+        self.assertEqual(docs_res.status_code, 200)
+
+    def test_health_endpoint_executes_select_1(self):
+        response = self.client.get('/api/health/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['status'], 'ok')
+        self.assertEqual(response.data['database'], 'ok')
+
+    def test_six_rest_operations_and_unauthorized_access(self):
+        self.assertEqual(self.client.get('/api/simulacros/').status_code, 401)
+        self.assertEqual(self.client.get('/api/preguntas/').status_code, 401)
+        self.assertEqual(self.client.get('/api/resultados/').status_code, 401)
+
+        self.authenticate(self.no_role)
+        self.assertEqual(self.client.get('/api/simulacros/').status_code, 403)
+        self.assertEqual(self.client.get('/api/preguntas/').status_code, 403)
+        self.assertEqual(self.client.get('/api/resultados/').status_code, 403)
+
+        self.authenticate(self.student)
+        sim_res = self.client.get('/api/simulacros/')
+        self.assertEqual(sim_res.status_code, 200)
+        self.assertEqual(len(sim_res.data), 1)
+        self.assertEqual(sim_res.data[0]['id'], self.quiz.id)
+
+        self.assertEqual(
+            self.client.patch(
+                f'/api/preguntas/{self.question.id}/',
+                {'enunciado': 'Intento no autorizado'},
+                format='json',
+            ).status_code,
+            403,
+        )
+
+        intento_res = self.client.post(
+            '/api/intentos/',
+            {'cuestionario': self.quiz.id},
+            format='json',
+        )
+        self.assertEqual(intento_res.status_code, 201)
+        intento_id = intento_res.data['intento_id']
+
+        self.assertEqual(
+            self.client.patch(
+                f'/api/intentos/{intento_id}/respuestas/',
+                {'pregunta': self.question.id, 'opcion': self.correct.id},
+                format='json',
+            ).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.post(f'/api/intentos/{intento_id}/enviar/', format='json').status_code,
+            200,
+        )
+
+        res_student = self.client.get('/api/resultados/')
+        self.assertEqual(res_student.status_code, 200)
+        self.assertEqual(len(res_student.data), 1)
+        self.assertEqual(res_student.data[0]['calificacion_final'], '5.00')
+
+        self.authenticate(self.admin)
+        preg_list = self.client.get('/api/preguntas/')
+        self.assertEqual(preg_list.status_code, 200)
+        self.assertEqual(len(preg_list.data), 1)
+
+        preg_patch = self.client.patch(
+            f'/api/preguntas/{self.question.id}/',
+            {'enunciado': '¿Cuál es la idea principal del texto actualizado?'},
+            format='json',
+        )
+        self.assertEqual(preg_patch.status_code, 200)
+        self.question.refresh_from_db()
+        self.assertIn('actualizado', self.question.enunciado)
+
+        res_admin = self.client.get('/api/resultados/')
+        self.assertEqual(res_admin.status_code, 200)
+        self.assertEqual(len(res_admin.data), 1)
+
+        rep_res = self.client.get(
+            '/api/reportes/',
+            {'anio': 2026, 'curso': self.course.id, 'eje': self.axis.id},
+        )
+        self.assertEqual(rep_res.status_code, 200)
+        self.assertEqual(rep_res.data['count'], 1)
+

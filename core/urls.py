@@ -13,7 +13,8 @@ from .auth_views import (
     UserDetailView,
     UserListCreateView,
 )
-from .views_cuestionarios import CuestionarioViewSet
+from .views import HealthCheckView
+from .views_cuestionarios import CuestionarioViewSet, SimulacroListView
 from .views_preguntas import (
     CategoriaViewSet,
     CompetenciaViewSet,
@@ -24,7 +25,7 @@ from .views_preguntas import (
     PlantillaExcelView,
     PreguntaViewSet,
 )
-from .views_intentos import IntentoViewSet
+from .views_intentos import IntentoViewSet, ResultadosPermitidosView
 from .views_usuarios import RegistroDocenteView, RegistroEstudianteView
 from .views_reportes import (
     ConsultaReporteView,
@@ -105,6 +106,9 @@ urlpatterns = [
         ExportarReporteView.as_view(),
         name='reportes_exportar',
     ),
+    path('health/', HealthCheckView.as_view(), name='health_check'),
+    path('simulacros/', SimulacroListView.as_view(), name='simulacros_list'),
+    path('resultados/', ResultadosPermitidosView.as_view(), name='resultados_list'),
     path('reportes/', ConsultaReporteView.as_view(), name='reportes'),
 ]
 

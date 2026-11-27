@@ -138,7 +138,7 @@ class PermissionSerializer(serializers.ModelSerializer):
         fields = ('id', 'name', 'codename', 'content_type')
         read_only_fields = fields
 
-    def get_name(self, obj):
+    def get_name(self, obj) -> str:
         return self.PERMISSION_LABELS.get(obj.codename, obj.name)
 
 
@@ -207,7 +207,7 @@ class UserSerializer(serializers.ModelSerializer):
         )
         read_only_fields = ('id', 'is_staff')
 
-    def get_permissions(self, obj):
+    def get_permissions(self, obj) -> list[str]:
         if obj.is_superuser:
             return ['*']
         return list(
@@ -216,10 +216,10 @@ class UserSerializer(serializers.ModelSerializer):
             .distinct()
         )
 
-    def get_numero_identidad(self, obj):
+    def get_numero_identidad(self, obj) -> str:
         return getattr(getattr(obj, 'perfil', None), 'numero_identidad', '')
 
-    def get_cursos(self, obj):
+    def get_cursos(self, obj) -> list[str]:
         return list(
             obj.matriculas.filter(activa=True).values_list(
                 'curso__nombre',

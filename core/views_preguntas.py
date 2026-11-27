@@ -4,6 +4,13 @@ import io
 from django.db import transaction
 from django.http import HttpResponse
 from django.utils import timezone
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import (
+    OpenApiParameter,
+    OpenApiResponse,
+    extend_schema,
+    extend_schema_view,
+)
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -37,6 +44,12 @@ from .serializers_preguntas import (
 )
 
 
+@extend_schema_view(
+    list=extend_schema(tags=['Preguntas'], summary='Listar categorías'),
+    retrieve=extend_schema(tags=['Preguntas'], summary='Consultar categoría'),
+    create=extend_schema(tags=['Preguntas'], summary='Crear categoría'),
+    partial_update=extend_schema(tags=['Preguntas'], summary='Actualizar categoría'),
+)
 class CategoriaViewSet(viewsets.ModelViewSet):
     queryset = Categoria.objects.all().order_by('nombre')
     serializer_class = CategoriaSerializer
@@ -44,6 +57,12 @@ class CategoriaViewSet(viewsets.ModelViewSet):
     http_method_names = ['get', 'post', 'patch', 'head', 'options']
 
 
+@extend_schema_view(
+    list=extend_schema(tags=['Preguntas'], summary='Listar competencias / ejes temáticos'),
+    retrieve=extend_schema(tags=['Preguntas'], summary='Consultar competencia'),
+    create=extend_schema(tags=['Preguntas'], summary='Crear competencia'),
+    partial_update=extend_schema(tags=['Preguntas'], summary='Actualizar competencia'),
+)
 class CompetenciaViewSet(viewsets.ModelViewSet):
     queryset = Competencia.objects.all().order_by('nombre')
     serializer_class = CompetenciaSerializer
@@ -51,6 +70,50 @@ class CompetenciaViewSet(viewsets.ModelViewSet):
     http_method_names = ['get', 'post', 'patch', 'head', 'options']
 
 
+@extend_schema_view(
+    list=extend_schema(
+        tags=['Preguntas'],
+        summary='Consultar preguntas autorizadas',
+        description=(
+            'Lista las preguntas del banco disponibles para usuarios con permiso '
+            '`manage_question_bank`. Permite filtrar por categoría, competencia, tipo y estado activo.'
+        ),
+        parameters=[
+            OpenApiParameter('categoria', OpenApiTypes.INT, OpenApiParameter.QUERY, required=False, description='ID de categoría'),
+            OpenApiParameter('competencia', OpenApiTypes.INT, OpenApiParameter.QUERY, required=False, description='ID de competencia / eje temático'),
+            OpenApiParameter('tipo', OpenApiTypes.STR, OpenApiParameter.QUERY, required=False, enum=['UNICA', 'MULTIPLE', 'VF'], description='Tipo de pregunta'),
+            OpenApiParameter('activa', OpenApiTypes.BOOL, OpenApiParameter.QUERY, required=False, description='Filtrar por preguntas activas (true/false)'),
+        ],
+        responses={
+            200: PreguntaListSerializer(many=True),
+            401: OpenApiResponse(description='No autenticado'),
+            403: OpenApiResponse(description='Sin permiso para gestionar el banco de preguntas'),
+        },
+    ),
+    retrieve=extend_schema(
+        tags=['Preguntas'],
+        summary='Consultar detalle de una pregunta autorizada',
+        responses={200: PreguntaSerializer, 401: OpenApiResponse(description='No autenticado'), 403: OpenApiResponse(description='Sin permiso')},
+    ),
+    create=extend_schema(
+        tags=['Preguntas'],
+        summary='Crear una pregunta en el banco',
+        responses={201: PreguntaSerializer, 400: OpenApiResponse(description='Datos u opciones inválidas'), 403: OpenApiResponse(description='Sin permiso')},
+    ),
+    partial_update=extend_schema(
+        tags=['Preguntas'],
+        summary='Actualizar una pregunta autorizada',
+        description='Actualiza parcialmente una pregunta (enunciado, texto base, puntaje, categoría, competencia, activa u opciones).',
+        request=PreguntaSerializer,
+        responses={
+            200: PreguntaSerializer,
+            400: OpenApiResponse(description='Error de validación'),
+            401: OpenApiResponse(description='No autenticado'),
+            403: OpenApiResponse(description='Sin permiso para gestionar preguntas'),
+            404: OpenApiResponse(description='Pregunta no encontrada'),
+        },
+    ),
+)
 class PreguntaViewSet(viewsets.ModelViewSet):
     queryset = Pregunta.objects.select_related('categoria', 'competencia').all()
     permission_classes = [IsAuthenticated, PuedeGestionarPreguntas]
@@ -111,6 +174,11 @@ class PreguntaViewSet(viewsets.ModelViewSet):
 class PlantillaExcelView(APIView):
     permission_classes = [IsAuthenticated, PuedeGestionarPreguntas]
 
+    @extend_schema(
+        tags=['Preguntas'],
+        summary='Descargar plantilla Excel de preguntas',
+        responses={200: OpenApiTypes.BINARY},
+    )
     def get(self, request):
         buffer = construir_plantilla()
         response = HttpResponse(
@@ -124,6 +192,12 @@ class PlantillaExcelView(APIView):
 class ImportacionListView(APIView):
     permission_classes = [IsAuthenticated, PuedeGestionarPreguntas]
 
+    @extend_schema(
+        tags=['Preguntas'],
+        operation_id='preguntas_importar_list',
+        summary='Listar historial de importaciones Excel',
+        responses={200: OpenApiResponse(description='Historial de importaciones')},
+    )
     def get(self, request):
         importaciones = ImportacionPreguntas.objects.filter(
             usuario=request.user,
@@ -148,6 +222,12 @@ class ImportacionListView(APIView):
 class ImportacionDetailView(APIView):
     permission_classes = [IsAuthenticated, PuedeGestionarPreguntas]
 
+    @extend_schema(
+        tags=['Preguntas'],
+        operation_id='preguntas_importar_detail',
+        summary='Consultar detalle de importación Excel',
+        responses={200: OpenApiResponse(description='Detalle de filas de importación')},
+    )
     def get(self, request, pk):
         try:
             importacion = ImportacionPreguntas.objects.prefetch_related(
@@ -178,6 +258,12 @@ class ImportacionDetailView(APIView):
             ],
         })
 
+    @extend_schema(
+        tags=['Preguntas'],
+        summary='Revalidar filas corregidas de importación Excel',
+        request=OpenApiTypes.OBJECT,
+        responses={200: OpenApiResponse(description='Filas revalidadas')},
+    )
     def patch(self, request, pk):
         try:
             importacion = ImportacionPreguntas.objects.get(
@@ -269,6 +355,12 @@ class ImportarPreviewView(APIView):
     permission_classes = [IsAuthenticated, PuedeGestionarPreguntas]
     parser_classes = [MultiPartParser, FormParser]
 
+    @extend_schema(
+        tags=['Preguntas'],
+        summary='Previsualizar y validar archivo Excel de preguntas',
+        request=OpenApiTypes.BINARY,
+        responses={200: OpenApiResponse(description='Vista previa de validación')},
+    )
     def post(self, request):
         archivo = request.FILES.get('archivo')
         if not archivo:
@@ -356,6 +448,12 @@ class ImportarConfirmarView(APIView):
     permission_classes = [IsAuthenticated, PuedeGestionarPreguntas]
     parser_classes = [MultiPartParser, FormParser]
 
+    @extend_schema(
+        tags=['Preguntas'],
+        summary='Confirmar importación de preguntas validada',
+        request=OpenApiTypes.OBJECT,
+        responses={201: OpenApiResponse(description='Preguntas importadas')},
+    )
     def post(self, request):
         importacion_id = request.data.get('importacion_id')
         if importacion_id:
