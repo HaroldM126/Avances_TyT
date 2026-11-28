@@ -169,15 +169,20 @@ function Home() {
   useEffect(() => {
     api.obtenerMe().then((currentUser) => {
       setUser(currentUser)
-      const requests = [obtenerCuestionariosDisponibles()]
-      if (currentUser.roles?.includes('Estudiante')) requests.push(api.obtenerIntentos())
+      if (!currentUser.roles?.includes('Estudiante')) {
+        navigate('/gestion', { replace: true })
+        return null
+      }
+      const requests = [obtenerCuestionariosDisponibles(), api.obtenerIntentos()]
       return Promise.all(requests)
-    }).then(([d, i = []]) => {
+    }).then((result) => {
+      if (!result) return
+      const [d, i = []] = result
       setCuestionarios(d)
       setIntentos(i)
       setEstado('success')
     }).catch((e) => { setError(e.message); setEstado('error') })
-  }, [])
+  }, [navigate])
   const visibles = cuestionarios.filter((q) => {
     const matchesSearch = q.nombre.toLowerCase().includes(search.toLowerCase())
     const matchesFilter = filter === 'todos' || (filter === 'cerrados' && q.fecha_cierre && new Date(q.fecha_cierre) < new Date()) || (filter === 'sin-intentos' && !q.puede_iniciar)
@@ -189,6 +194,7 @@ function Home() {
     catch (e) { setError(e.message) }
     finally { setIniciando(false) }
   }
+  if (user && !user.roles?.includes('Estudiante')) return <LoadingScreen text="Abriendo tu espacio de trabajo…" />
   return <main className="app-shell"><Topbar onLogout={logout}><button className="text-button" type="button" onClick={() => navigate('/inicio')}><Icon name="quiz" />Cuestionarios</button><button className="text-button" type="button" onClick={() => navigate('/gestion')}><Icon name="settings" />Gestión</button></Topbar>
     <section className="content-column" aria-labelledby="available-title"><header className="page-heading"><p className="eyebrow">Estudiante</p><h1 id="available-title">Cuestionarios disponibles</h1><p>Elige una evaluación cuando estés listo para comenzar.</p></header>
       {estado === 'loading' && <div className="state-block" role="status"><span className="loading-dot" aria-hidden="true" /><p>Consultando cuestionarios disponibles…</p></div>}
@@ -292,7 +298,7 @@ function ManagementPage() {
   if (!me) return <LoadingScreen text="Cargando permisos…" />
   if (!canManage) return <ErrorScreen error="No tienes permisos para acceder a la gestión." onBack={() => navigate('/inicio')} />
   if (!tabs.length) return <ErrorScreen error="Tu cuenta no tiene permisos de gestión asignados." onBack={() => navigate('/inicio')} />
-  return <main className="app-shell"><Topbar title="Gestión" onLogout={logout}><button className="text-button" type="button" onClick={() => navigate('/inicio')}><Icon name="quiz" />Cuestionarios</button></Topbar><section className="content-column management"><header className="page-heading"><p className="eyebrow">{isStudent ? 'Estudiante' : 'Administración'}</p><h1>{isStudent ? 'Mi seguimiento académico' : 'Gestionar la plataforma'}</h1><p>{isStudent ? 'Consulta tus intentos y resultados sin acceder a módulos administrativos.' : 'Administra preguntas, evaluaciones, usuarios, roles, resultados y reportes.'}</p></header><nav className="segment-control" aria-label="Secciones de gestión">{tabs.map(([value, label, icon]) => <button key={value} className={tab === value ? 'segment-control__item segment-control__item--active' : 'segment-control__item'} onClick={() => setTab(value)} type="button"><Icon name={icon} />{label}</button>)}</nav>{tab === 'seguimiento' && <StudentTracking />}{tab === 'preguntas' && <QuestionManager />}{tab === 'catalogos' && <CatalogManager />}{tab === 'cuestionarios' && <QuizManager />}{tab === 'resultados' && <ResultsManager />}{tab === 'reportes' && <Reportes canSeeIdentification={can('ver_identificacion_estudiante')} isStudent={!can('ver_reportes')} />}{tab === 'usuarios' && <UserManager />}{tab === 'roles' && <RoleManager />}{tab === 'importar' && <ImportManager />}</section></main>
+  return <main className="app-shell"><Topbar title="Gestión" onLogout={logout}>{isStudent && <button className="text-button" type="button" onClick={() => navigate('/inicio')}><Icon name="quiz" />Cuestionarios</button>}</Topbar><section className="content-column management"><header className="page-heading"><p className="eyebrow">{isStudent ? 'Estudiante' : 'Administración'}</p><h1>{isStudent ? 'Mi seguimiento académico' : 'Gestionar la plataforma'}</h1><p>{isStudent ? 'Consulta tus intentos y resultados sin acceder a módulos administrativos.' : 'Administra preguntas, evaluaciones, usuarios, roles, resultados y reportes.'}</p></header><nav className="segment-control" aria-label="Secciones de gestión">{tabs.map(([value, label, icon]) => <button key={value} className={tab === value ? 'segment-control__item segment-control__item--active' : 'segment-control__item'} onClick={() => setTab(value)} type="button"><Icon name={icon} />{label}</button>)}</nav>{tab === 'seguimiento' && <StudentTracking />}{tab === 'preguntas' && <QuestionManager />}{tab === 'catalogos' && <CatalogManager />}{tab === 'cuestionarios' && <QuizManager />}{tab === 'resultados' && <ResultsManager />}{tab === 'reportes' && <Reportes canSeeIdentification={can('ver_identificacion_estudiante')} isStudent={!can('ver_reportes')} />}{tab === 'usuarios' && <UserManager />}{tab === 'roles' && <RoleManager />}{tab === 'importar' && <ImportManager />}</section></main>
 }
 
 function StudentTracking() {

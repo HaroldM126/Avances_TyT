@@ -85,7 +85,7 @@ class CuestionarioViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
-        if not (self.request.user.is_superuser or self.request.user.is_staff):
+        if not self.request.user.is_superuser:
             qs = qs.filter(creador=self.request.user)
         params = self.request.query_params
         activo = params.get('activo')
