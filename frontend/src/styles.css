@@ -853,6 +853,12 @@ input:focus-visible {
   gap: 14px;
 }
 
+.option-edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .option-edit label,
 .question-picker label,
 .check-field {
